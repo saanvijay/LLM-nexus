@@ -138,6 +138,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-backend/certs/ca.crt
-backend/certs/ca.key
-backend/package-lock.json
+package-lock.json
+*.crt
+*.key
