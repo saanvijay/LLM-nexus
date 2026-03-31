@@ -36,7 +36,7 @@ function handleRequest(req, res) {
       proxyRes.on('data', c => resChunks.push(c));
       proxyRes.on('end', () => {
         const resBuffer = Buffer.concat(resChunks);
-        log(reqData, extractResponse(resBuffer, proxyRes.headers['content-type']));
+        log(reqData, extractResponse(resBuffer, proxyRes.headers['content-type'], proxyRes.headers['content-encoding']));
         if (!res.headersSent) {
           res.writeHead(proxyRes.statusCode, proxyRes.headers);
           res.end(resBuffer);

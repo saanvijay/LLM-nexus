@@ -39,26 +39,40 @@ On first run, a self-signed CA certificate is generated and saved to `backend/ce
 **3. Trust the CA cert (macOS, run once)**
 
 ```bash
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain backend/certs/ca.crt
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  backend/certs/ca.crt
 ```
 
 **4. Tell Node.js about the CA cert**
 
-Add to `~/.zshrc`:
+Add to `~/.zprofile` (not `~/.zshrc` — GUI apps like VS Code don't read `~/.zshrc`):
 
 ```bash
 export NODE_EXTRA_CA_CERTS="/Users/vijay/LLM-PAYG/backend/certs/ca.crt"
 ```
 
+Also apply it immediately to the running session and all new GUI processes:
+
+```bash
+launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-PAYG/backend/certs/ca.crt"
+```
+
 **5. Export proxy env**
+
+Add to `~/.zprofile`:
 
 ```bash
 export HTTP_PROXY=http://localhost:3000
 export HTTPS_PROXY=http://localhost:3000
 ```
 
+Apply immediately:
+
 ```bash
-source ~/.zshrc
+launchctl setenv HTTP_PROXY "http://localhost:3000"
+launchctl setenv HTTPS_PROXY "http://localhost:3000"
+source ~/.zprofile
 ```
 
 **6. VS Code setting** (catches anything Electron still rejects)
@@ -69,15 +83,45 @@ Add to VS Code `settings.json`:
 "http.proxyStrictSSL": false
 ```
 
-**7. Restart VS Code** (Cmd+Q, not just close window) so Copilot picks up all changes.
+**7. Restart VS Code** (Cmd+Q — not just close the window) so Copilot picks up all changes.
+
+---
 
 ### Troubleshooting
+
+#### Certificate signature failure / regenerating certs
+
+If you see `certificate signature failure`, the CA cert in the keychain no longer matches the key on disk. Regenerate from scratch:
+
+```bash
+# 1. Remove old certs
+rm backend/certs/ca.crt backend/certs/ca.key
+
+# 2. Remove old trusted cert from keychain
+sudo security delete-certificate -c "LLM-PAYG Proxy CA" /Library/Keychains/System.keychain
+
+# 3. Restart the server — new CA is generated automatically
+node proxy/server.js
+
+# 4. Trust the new CA
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  backend/certs/ca.crt
+
+# 5. Re-apply launchctl env vars and fully restart VS Code
+launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-PAYG/backend/certs/ca.crt"
+```
+
+#### Error reference
 
 | Error | Fetcher | Fix |
 |---|---|---|
 | `ERR_CERT_AUTHORITY_INVALID` | `electron-fetch` | macOS keychain trust (step 3) |
-| `fetch failed` | `node-fetch` | `NODE_EXTRA_CA_CERTS` (step 4) |
-| `unable to verify first certificate` | `node-http` | `NODE_EXTRA_CA_CERTS` (step 4) |
+| `fetch failed` | `node-fetch` | `NODE_EXTRA_CA_CERTS` in `~/.zprofile` + `launchctl` (step 4) |
+| `unable to verify first certificate` | `node-http` | `NODE_EXTRA_CA_CERTS` in `~/.zprofile` + `launchctl` (step 4) |
+| `certificate signature failure` | `node-http` | Regenerate certs (see above) |
+
+---
 
 ### Configuration
 
@@ -94,12 +138,7 @@ Edit [backend/config/proxy.config.json](backend/config/proxy.config.json) to cha
 ### Log Output
 
 ```
-[2026-03-30T10:00:01.123Z] POST https://copilot-proxy.githubusercontent.com/v1/completions | status=200 | req=42ms | res=318ms
-  >> PROMPT: [{"role":"user","content":"complete this function..."}]
-  << RESPONSE: [{"text":"function foo() { return 42; }","index":0}]
+[2026-03-30T10:00:01.123Z]
+  PROMPT: [{"role":"user","content":"complete this function..."}]
+  RESPONSE (total tokens: 312): [{"text":"function foo() { return 42; }","index":0}]
 ```
-
-- `req` — time to establish the upstream connection
-- `res` — time to receive the full response
-- `>>` — summarised request body (prompt / messages)
-- `<<` — summarised response body (choices / completions)
