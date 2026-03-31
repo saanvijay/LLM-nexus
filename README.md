@@ -138,7 +138,14 @@ Edit [backend/config/proxy.config.json](backend/config/proxy.config.json) to cha
 ### Log Output
 
 ```
-[2026-03-30T10:00:01.123Z]
-  PROMPT: [{"role":"user","content":"complete this function..."}]
-  RESPONSE (total tokens: 312): [{"text":"function foo() { return 42; }","index":0}]
+[2026-03-31T03:00:19.777Z]
+  PROMPT: [{"role":"system","content":"..."},{"role":"user","content":"complete this function..."}]
+  RESPONSE (input tokens: 245, output tokens: 87): The answer is...
 ```
+
+- `PROMPT` — the full messages array sent to the model
+- `RESPONSE` — the accumulated text content from the model
+- `input tokens` — prompt tokens consumed (from `usage.prompt_tokens` in the response)
+- `output tokens` — completion tokens generated (from `usage.completion_tokens` in the response)
+
+Both streaming (`text/event-stream`) and non-streaming (`application/json`) responses are supported. Token counts appear when the API includes `usage` data in the response.
