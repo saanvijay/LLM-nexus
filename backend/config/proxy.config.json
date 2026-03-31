@@ -1,0 +1,9 @@
+{
+  "port": 3000,
+  "host": "localhost",
+  "defaultPorts": {
+    "http": 80,
+    "https": 443
+  },
+  "requestTimeout": 30000
+}
