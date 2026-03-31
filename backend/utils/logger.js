@@ -32,18 +32,22 @@ function extractResponse(buffer, contentType, contentEncoding) {
     // Streaming SSE response (text/event-stream)
     if (contentType && contentType.includes('text/event-stream')) {
       let content = '';
-      let totalTokens = null;
+      let inputTokens = null;
+      let outputTokens = null;
       for (const line of text.split('\n')) {
         if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
         try {
           const chunk = JSON.parse(line.slice(6));
           const delta = chunk.choices?.[0]?.delta?.content ?? chunk.choices?.[0]?.text ?? '';
           if (delta) content += delta;
-          if (chunk.usage?.total_tokens) totalTokens = chunk.usage.total_tokens;
+          if (chunk.usage) {
+            inputTokens  = chunk.usage.prompt_tokens     ?? chunk.usage.input_tokens  ?? inputTokens;
+            outputTokens = chunk.usage.completion_tokens ?? chunk.usage.output_tokens ?? outputTokens;
+          }
         } catch { /* skip malformed chunk */ }
       }
       if (!content) return null;
-      return { response: content.slice(0, 800), totalTokens };
+      return { response: content.slice(0, 800), inputTokens, outputTokens };
     }
 
     // Regular JSON response
@@ -51,8 +55,9 @@ function extractResponse(buffer, contentType, contentEncoding) {
       const json = JSON.parse(text);
       const output = json.choices ?? json.completions ?? json.output ?? json.content ?? null;
       if (output === null) return null;
-      const totalTokens = json.usage?.total_tokens ?? json.usage?.totalTokens ?? null;
-      return { response: JSON.stringify(output).slice(0, 800), totalTokens };
+      const inputTokens  = json.usage?.prompt_tokens     ?? json.usage?.input_tokens  ?? null;
+      const outputTokens = json.usage?.completion_tokens ?? json.usage?.output_tokens ?? null;
+      return { response: JSON.stringify(output).slice(0, 800), inputTokens, outputTokens };
     }
   } catch { /* ignore */ }
   return null;
@@ -63,11 +68,13 @@ function log(reqData, resData) {
   const ts = new Date().toISOString();
   const lines = [`[${ts}]`];
   if (reqData) {
-    const tokenNote = reqData.inputTokens != null ? ` (input tokens: ${reqData.inputTokens})` : '';
-    lines.push(`  PROMPT${tokenNote}: ${reqData.prompt}`);
+    lines.push(`  PROMPT: ${reqData.prompt}`);
   }
   if (resData) {
-    const tokenNote = resData.totalTokens != null ? ` (total tokens: ${resData.totalTokens})` : '';
+    const parts = [];
+    if (resData.inputTokens  != null) parts.push(`input tokens: ${resData.inputTokens}`);
+    if (resData.outputTokens != null) parts.push(`output tokens: ${resData.outputTokens}`);
+    const tokenNote = parts.length ? ` (${parts.join(', ')})` : '';
     lines.push(`  RESPONSE${tokenNote}: ${resData.response}`);
   }
   console.log(lines.join('\n'));
