@@ -13,12 +13,15 @@ backend/
 │   ├── handler.js            # Request / response forwarding logic
 │   └── certManager.js        # CA + per-host TLS cert generation & cache
 └── utils/
-    └── logger.js             # Log formatting and body summarisation
+    ├── logger.js             # Log formatting, prompt/response extraction
+    ├── cache.js              # In-memory prompt cache (exact + similarity matching)
+    ├── tokenizer.js          # Real BPE token counting via tiktoken
+    └── simpleOps.js          # Simple file-op detection and interception
 ```
 
 ## Local Proxy Server
 
-A lightweight Node.js MITM (man-in-the-middle) proxy that intercepts HTTP and HTTPS traffic, logs request/response content (including prompts and completions), and is designed to route VS Code GitHub Copilot requests for observability.
+A lightweight Node.js MITM (man-in-the-middle) proxy that intercepts HTTP and HTTPS traffic, logs prompts and completions with accurate token counts, caches responses to avoid redundant LLM calls, and intercepts trivial file operations that a human can perform manually.
 
 ### Setup
 
@@ -87,6 +90,95 @@ Add to VS Code `settings.json`:
 
 ---
 
+### Features
+
+#### Token counting
+
+Every intercepted request is tokenised with [tiktoken](https://github.com/openai/tiktoken) — the same BPE tokeniser used by OpenAI models. Token counts are computed locally from the actual prompt and response text, so they are accurate even when the upstream API omits the `usage` field.
+
+The model is read from the request body (`json.model`) and the correct encoding is selected automatically:
+
+| Model prefix | Encoding |
+|---|---|
+| `gpt-4o` | `o200k_base` |
+| `gpt-4`, `gpt-3.5` | `cl100k_base` |
+| `text-davinci` | `p50k_base` |
+| Unknown | `cl100k_base` (fallback) |
+
+#### Prompt cache
+
+Identical and similar prompts are served from an in-memory cache, skipping the upstream LLM call entirely. The cache logs how many tokens would have been consumed.
+
+**Exact match** — the full prompt text is used as a cache key. If the same prompt arrives again, the stored response is replayed instantly.
+
+**Similarity match** — prompts are tokenised into word sets and compared with Jaccard similarity. Any prompt scoring ≥ 75% against a cached entry is treated as a hit. The threshold can be changed by editing `SIMILARITY_THRESHOLD` in [backend/utils/cache.js](backend/utils/cache.js).
+
+#### Simple-op interception
+
+Prompts that describe trivial file-system operations are intercepted before reaching the LLM. The proxy returns a plain-English instruction telling the user to perform the action manually, and logs how many tokens were saved.
+
+Detected operations:
+
+| Prompt contains | Operation |
+|---|---|
+| `create/add/make a file` | Create / Add File |
+| `delete/remove a file` | Delete / Remove File |
+| `move file/directory` | Move File / Directory |
+| `rename file/directory` | Rename File / Directory |
+| `copy file/directory` | Copy File / Directory |
+| `add a comment` | Add Comment |
+
+---
+
+### Request pipeline
+
+Each request passes through these stages in order:
+
+```
+1. Simple-op check   →  intercept immediately, return manual instruction, skip LLM
+2. Exact cache hit   →  replay stored response, skip LLM
+3. Similar cache hit →  replay best matching cached response, skip LLM
+4. Upstream LLM call →  forward request, cache the response, return to client
+```
+
+---
+
+### Log output
+
+Every request produces at least one log line. Prompt and response details are appended when the body can be parsed.
+
+**Normal LLM call**
+```
+[2026-04-01T10:00:00.000Z] POST api.openai.com/v1/chat/completions → 200
+  PROMPT  [42 tokens] : [{"role":"user","content":"explain async/await"}]
+  RESPONSE [output: 87 tokens] : Async/await is syntactic sugar over Promises...
+```
+
+**Exact cache hit**
+```
+[2026-04-01T10:00:01.000Z] POST api.openai.com/v1/chat/completions → CACHE HIT (exact)
+  PROMPT  [42 tokens] : [{"role":"user","content":"explain async/await"}]
+  CACHED RESPONSE [input: 42, output: 87, total: 129 tokens] : Async/await is...
+```
+
+**Similar cache hit**
+```
+[2026-04-01T10:00:02.000Z] POST api.openai.com/v1/chat/completions → CACHE HIT (similar 81.3%)
+  PROMPT  [39 tokens] : [{"role":"user","content":"what is async/await?"}]
+  CACHED RESPONSE [input: 42, output: 87, total: 129 tokens] : Async/await is...
+```
+
+**Simple-op interception**
+```
+[2026-04-01T10:00:03.000Z] POST api.openai.com/v1/chat/completions → SIMPLE OP INTERCEPTED — LLM call skipped
+  PROMPT  [27 tokens] : [{"role":"user","content":"create a new file called config.yaml"}]
+  OPERATION        : Create / Add File
+  ESTIMATED TOKENS : 27 (saved by skipping LLM)
+  DO MANUALLY      : Run in your terminal:  touch <filename>
+```
+
+---
+
 ### Troubleshooting
 
 #### Certificate signature failure / regenerating certs
@@ -134,18 +226,3 @@ Edit [backend/config/proxy.config.json](backend/config/proxy.config.json) to cha
 | `requestTimeout` | `30000` (ms) | `REQUEST_TIMEOUT` |
 | `defaultPorts.http` | `80` | — |
 | `defaultPorts.https` | `443` | — |
-
-### Log Output
-
-```
-[2026-03-31T03:00:19.777Z]
-  PROMPT: [{"role":"system","content":"..."},{"role":"user","content":"complete this function..."}]
-  RESPONSE (input tokens: 245, output tokens: 87): The answer is...
-```
-
-- `PROMPT` — the full messages array sent to the model
-- `RESPONSE` — the accumulated text content from the model
-- `input tokens` — prompt tokens consumed (from `usage.prompt_tokens` in the response)
-- `output tokens` — completion tokens generated (from `usage.completion_tokens` in the response)
-
-Both streaming (`text/event-stream`) and non-streaming (`application/json`) responses are supported. Token counts appear when the API includes `usage` data in the response.
