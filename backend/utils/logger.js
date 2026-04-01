@@ -53,33 +53,82 @@ function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o')
       for (const line of text.split('\n')) {
         if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
         try {
-          const chunk  = JSON.parse(line.slice(6));
-          const delta  = chunk.choices?.[0]?.delta?.content ?? chunk.choices?.[0]?.text ?? '';
+          const chunk = JSON.parse(line.slice(6));
+
+          // OpenAI format: choices[0].delta.content  or  choices[0].text
+          const delta = chunk.choices?.[0]?.delta?.content ?? chunk.choices?.[0]?.text ?? null;
           if (delta) content += delta;
+
+          // Anthropic streaming format: content_block_delta / text_delta
+          if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
+            content += chunk.delta.text ?? '';
+          }
+
+          // Token usage — OpenAI
           if (chunk.usage) {
             inputTokens  = chunk.usage.prompt_tokens     ?? chunk.usage.input_tokens  ?? inputTokens;
             outputTokens = chunk.usage.completion_tokens ?? chunk.usage.output_tokens ?? outputTokens;
           }
+          // Token usage — Anthropic message_start (input) and message_delta (output)
+          if (chunk.type === 'message_start' && chunk.message?.usage) {
+            inputTokens = chunk.message.usage.input_tokens ?? inputTokens;
+          }
+          if (chunk.type === 'message_delta' && chunk.usage) {
+            outputTokens = chunk.usage.output_tokens ?? outputTokens;
+          }
         } catch { /* skip malformed chunk */ }
       }
-      if (!content) return null;
-      // Fallback: count output tokens locally when API does not report them
-      if (outputTokens == null) outputTokens = tokenize(content, model).count;
-      return { response: content, inputTokens, outputTokens };
+      if (content) {
+        if (outputTokens == null) outputTokens = tokenize(content, model).count;
+        return { response: content, inputTokens, outputTokens };
+      }
+      // SSE detected but no text extracted — dump raw lines so the format is visible
+      const rawSSE = text.split('\n')
+        .filter(l => l.startsWith('data: ') && l !== 'data: [DONE]')
+        .join('\n');
+      if (rawSSE) return { response: rawSSE, inputTokens: null, outputTokens: null, isRaw: true };
+      return null;
     }
 
     // Try JSON regardless of content-type header
     try {
-      const json   = JSON.parse(text);
-      const output = json.choices ?? json.completions ?? json.output ?? json.content ?? null;
-      if (output !== null) {
-        const inputTokens   = json.usage?.prompt_tokens     ?? json.usage?.input_tokens  ?? null;
-        const reportedOut   = json.usage?.completion_tokens ?? json.usage?.output_tokens ?? null;
-        const outputText    = typeof output === 'string' ? output : JSON.stringify(output);
-        const outputTokens  = reportedOut ?? tokenize(outputText, model).count;
+      const json        = JSON.parse(text);
+      let outputText    = null;
+      let inputTokens   = json.usage?.prompt_tokens  ?? json.usage?.input_tokens  ?? null;
+      let reportedOut   = json.usage?.completion_tokens ?? json.usage?.output_tokens ?? null;
+
+      if (json.choices) {
+        // OpenAI: extract text from choices[0].message.content or choices[0].text
+        outputText = json.choices.map(c => {
+          const content = c?.message?.content ?? c?.text ?? null;
+          if (typeof content === 'string') return content;
+          if (Array.isArray(content)) return content.map(b => b?.text ?? '').join('');
+          return '';
+        }).filter(Boolean).join('\n');
+      } else if (json.content) {
+        // Anthropic: content array of blocks, or plain string
+        outputText = Array.isArray(json.content)
+          ? json.content.map(b => b?.text ?? '').filter(Boolean).join('')
+          : json.content;
+        inputTokens = json.usage?.input_tokens  ?? inputTokens;
+        reportedOut = json.usage?.output_tokens ?? reportedOut;
+      } else if (json.completions) {
+        outputText = typeof json.completions === 'string' ? json.completions : JSON.stringify(json.completions);
+      } else if (json.output) {
+        outputText = typeof json.output === 'string' ? json.output : JSON.stringify(json.output);
+      }
+
+      if (outputText) {
+        const outputTokens = reportedOut ?? tokenize(outputText, model).count;
         return { response: outputText, inputTokens, outputTokens };
       }
     } catch { /* not JSON */ }
+
+    // Last resort: strip non-printable bytes and show whatever text is readable
+    const readable = text.replace(/[^\x09\x0a\x0d\x20-\x7e]/g, '').trim();
+    if (readable.length > 20) {
+      return { response: readable, inputTokens: null, outputTokens: null, isRaw: true };
+    }
   } catch { /* ignore */ }
   return null;
 }
@@ -90,16 +139,21 @@ function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o')
  * explicit token counts when extraction succeeds.
  */
 function log(method, url, statusCode, reqData, resData) {
+  if (!reqData && !resData) return;   // skip telemetry and non-LLM traffic
   const ts = new Date().toISOString();
   const lines = [`[${ts}] ${method} ${url} → ${statusCode}`];
   if (reqData) {
     lines.push(`  PROMPT  [${reqData.inputTokens} tokens] : ${reqData.prompt}`);
   }
   if (resData) {
-    const inPart  = resData.inputTokens  != null ? `input: ${resData.inputTokens}` : null;
-    const outPart = resData.outputTokens != null ? `output: ${resData.outputTokens}` : null;
-    const tok     = [inPart, outPart].filter(Boolean).join(', ');
-    lines.push(`  RESPONSE${tok ? ` [${tok} tokens]` : ''} : ${resData.response}`);
+    if (resData.isRaw) {
+      lines.push(`  RESPONSE [RAW — unknown format, fix extractResponse] : ${resData.response}`);
+    } else {
+      const inPart  = resData.inputTokens  != null ? `input: ${resData.inputTokens}` : null;
+      const outPart = resData.outputTokens != null ? `output: ${resData.outputTokens}` : null;
+      const tok     = [inPart, outPart].filter(Boolean).join(', ');
+      lines.push(`  RESPONSE${tok ? ` [${tok} tokens]` : ''} : ${resData.response}`);
+    }
   }
   console.log(lines.join('\n'));
 }
