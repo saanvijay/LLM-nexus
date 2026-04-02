@@ -2,7 +2,7 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 const config = require('../config/proxy.config.json');
-const { log, logCacheHit, logSimpleOp, extractPrompt, extractResponse } = require('../utils/logger');
+const { log, logCacheHit, logSimpleOp, extractPrompt, extractResponse, isDebug } = require('../utils/logger');
 const promptCache = require('../utils/cache');
 const { detectSimpleOp, buildInterceptResponse } = require('../utils/simpleOps');
 
@@ -48,8 +48,8 @@ function handleRequest(req, res) {
     const method      = req.method;
     const url         = `${parsed.hostname}${parsed.pathname}`;
 
-    // Simple-op interception: human-executable operations skip the LLM entirely
-    const simpleOp = detectSimpleOp(reqBuffer, contentType);
+    // Simple-op interception: only active when saveToken is enabled in config
+    const simpleOp = config.saveToken && detectSimpleOp(reqBuffer, contentType);
     if (simpleOp) {
       logSimpleOp(method, url, reqData, simpleOp.opName, simpleOp.instruction, simpleOp.estimatedTokens);
       if (!res.headersSent) {
@@ -91,6 +91,11 @@ function handleRequest(req, res) {
       proxyRes.on('end', () => {
         const resBuffer  = Buffer.concat(resChunks);
         const resData    = extractResponse(resBuffer, proxyRes.headers['content-type'], proxyRes.headers['content-encoding'], reqData?.model);
+        if (!resData && reqData && isDebug) {
+          console.log(`[DEBUG] content-type: ${proxyRes.headers['content-type']}`);
+          console.log(`[DEBUG] content-encoding: ${proxyRes.headers['content-encoding']}`);
+          console.log(`[DEBUG] response body (first 500 chars):\n${resBuffer.toString('utf8').slice(0, 500)}`);
+        }
         log(method, url, proxyRes.statusCode, reqData, resData);
         // Store in cache for future identical prompts
         if (cacheKey) {

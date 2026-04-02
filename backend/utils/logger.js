@@ -1,5 +1,9 @@
-const zlib = require('zlib');
+const zlib   = require('zlib');
+const config = require('../config/proxy.config.json');
 const { tokenize } = require('./tokenizer');
+
+const LOG_LEVEL = (process.env.LOG_LEVEL ?? config.logLevel ?? 'INFO').toUpperCase();
+const isDebug   = LOG_LEVEL === 'DEBUG';
 
 function decompress(buffer, encoding) {
   try {
@@ -10,31 +14,71 @@ function decompress(buffer, encoding) {
   return buffer;
 }
 
+// Flatten a message content value to plain text.
+// Handles string, OpenAI content-block arrays [{type,text}], and fallback JSON.
+function flattenContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map(b => b?.text ?? b?.input ?? '').filter(Boolean).join('');
+  }
+  return JSON.stringify(content);
+}
+
 /**
- * Extracts prompt text and counts input tokens using tiktoken.
- * Content-type header is not required — always tries JSON parse.
+ * Extracts system prompt, last user prompt, and per-part token counts.
+ * Returns { systemPrompt, systemTokens, userPrompt, userTokens, model } or null.
  */
 function extractPrompt(buffer) {
   if (!buffer || !buffer.length) return null;
   try {
-    const json   = JSON.parse(buffer.toString('utf8'));
-    const raw    = json.prompt ?? json.messages ?? json.inputs ?? json.input ?? null;
-    if (raw === null) return null;
-    const model  = json.model ?? 'gpt-4o';
-    const text   = typeof raw === 'string' ? raw : JSON.stringify(raw);
-    const { count: inputTokens } = tokenize(text, model);
-    return { prompt: text, inputTokens, model };
+    const json  = JSON.parse(buffer.toString('utf8'));
+    const model = json.model ?? 'gpt-4o';
+
+    // Chat format: messages array — each item must have a role field,
+    // otherwise it's not an LLM messages array (e.g. telemetry event arrays).
+    if (Array.isArray(json.messages) && json.messages.some(m => m?.role)) {
+      const msgs = json.messages;
+
+      const systemText = msgs
+        .filter(m => m.role === 'system')
+        .map(m => flattenContent(m.content))
+        .join('\n')
+        .trim();
+
+      const lastUser = [...msgs].reverse().find(m => m.role === 'user');
+      const userText = lastUser ? flattenContent(lastUser.content).trim() : null;
+
+      if (!systemText && !userText) return null;
+
+      return {
+        systemPrompt:  systemText  || null,
+        systemTokens:  systemText  ? tokenize(systemText,  model).count : 0,
+        userPrompt:    userText,
+        userTokens:    userText    ? tokenize(userText,    model).count : 0,
+        model,
+      };
+    }
+
+    // Plain prompt string (completion-style) — must be a string, not an
+    // arbitrary JSON array (which is what telemetry payloads look like).
+    const raw = json.prompt ?? null;
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    return {
+      systemPrompt: null,
+      systemTokens: 0,
+      userPrompt:   raw,
+      userTokens:   tokenize(raw, model).count,
+      model,
+    };
   } catch {
     return null;
   }
 }
 
 /**
- * Extracts response text and token counts.
- * - SSE is detected by content-type OR by body starting with "data:" so it works
- *   even when the header is absent or mismatched.
- * - Output tokens fall back to tiktoken when the API omits the usage field.
- * @param {string} [model] - model name from the request, used for tiktoken fallback
+ * Extracts response text and output token count.
+ * Handles OpenAI and Anthropic streaming (SSE) and non-streaming (JSON) formats.
+ * Falls back to raw text dump when format is unrecognised so output is always visible.
  */
 function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o') {
   if (!buffer || !buffer.length) return null;
@@ -42,36 +86,36 @@ function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o')
     const decompressed = decompress(buffer, contentEncoding);
     const text = decompressed.toString('utf8');
 
-    // Detect SSE by header OR by body shape (works even when header is wrong/missing)
     const isSSE = (contentType && contentType.includes('text/event-stream'))
                || text.trimStart().startsWith('data:');
 
     if (isSSE) {
       let content      = '';
-      let inputTokens  = null;
       let outputTokens = null;
       for (const line of text.split('\n')) {
         if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
         try {
           const chunk = JSON.parse(line.slice(6));
 
-          // OpenAI format: choices[0].delta.content  or  choices[0].text
-          const delta = chunk.choices?.[0]?.delta?.content ?? chunk.choices?.[0]?.text ?? null;
+          // OpenAI chat / completion — try every known text field name
+          const delta =
+            chunk.choices?.[0]?.delta?.content ??   // standard OpenAI chat
+            chunk.choices?.[0]?.delta?.text    ??   // some providers use text
+            chunk.choices?.[0]?.text           ??   // completion-style
+            chunk.delta?.content               ??   // top-level delta
+            chunk.delta?.text                  ??   // top-level delta alt
+            null;
           if (delta) content += delta;
 
-          // Anthropic streaming format: content_block_delta / text_delta
-          if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-            content += chunk.delta.text ?? '';
+          // Anthropic content_block_delta (text_delta or bare text)
+          if (chunk.type === 'content_block_delta') {
+            if (chunk.delta?.type === 'text_delta') content += chunk.delta.text ?? '';
+            else if (typeof chunk.delta?.text === 'string') content += chunk.delta.text;
           }
 
-          // Token usage — OpenAI
+          // Token counts
           if (chunk.usage) {
-            inputTokens  = chunk.usage.prompt_tokens     ?? chunk.usage.input_tokens  ?? inputTokens;
             outputTokens = chunk.usage.completion_tokens ?? chunk.usage.output_tokens ?? outputTokens;
-          }
-          // Token usage — Anthropic message_start (input) and message_delta (output)
-          if (chunk.type === 'message_start' && chunk.message?.usage) {
-            inputTokens = chunk.message.usage.input_tokens ?? inputTokens;
           }
           if (chunk.type === 'message_delta' && chunk.usage) {
             outputTokens = chunk.usage.output_tokens ?? outputTokens;
@@ -80,25 +124,23 @@ function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o')
       }
       if (content) {
         if (outputTokens == null) outputTokens = tokenize(content, model).count;
-        return { response: content, inputTokens, outputTokens };
+        return { response: content, outputTokens };
       }
-      // SSE detected but no text extracted — dump raw lines so the format is visible
+      // SSE detected but no text — dump raw data lines for diagnosis
       const rawSSE = text.split('\n')
         .filter(l => l.startsWith('data: ') && l !== 'data: [DONE]')
         .join('\n');
-      if (rawSSE) return { response: rawSSE, inputTokens: null, outputTokens: null, isRaw: true };
+      if (rawSSE) return { response: rawSSE, outputTokens: null, isRaw: true };
       return null;
     }
 
-    // Try JSON regardless of content-type header
+    // Non-streaming JSON
     try {
-      const json        = JSON.parse(text);
-      let outputText    = null;
-      let inputTokens   = json.usage?.prompt_tokens  ?? json.usage?.input_tokens  ?? null;
-      let reportedOut   = json.usage?.completion_tokens ?? json.usage?.output_tokens ?? null;
+      const json      = JSON.parse(text);
+      let outputText  = null;
+      let reportedOut = json.usage?.completion_tokens ?? json.usage?.output_tokens ?? null;
 
       if (json.choices) {
-        // OpenAI: extract text from choices[0].message.content or choices[0].text
         outputText = json.choices.map(c => {
           const content = c?.message?.content ?? c?.text ?? null;
           if (typeof content === 'string') return content;
@@ -106,11 +148,9 @@ function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o')
           return '';
         }).filter(Boolean).join('\n');
       } else if (json.content) {
-        // Anthropic: content array of blocks, or plain string
-        outputText = Array.isArray(json.content)
+        outputText  = Array.isArray(json.content)
           ? json.content.map(b => b?.text ?? '').filter(Boolean).join('')
           : json.content;
-        inputTokens = json.usage?.input_tokens  ?? inputTokens;
         reportedOut = json.usage?.output_tokens ?? reportedOut;
       } else if (json.completions) {
         outputText = typeof json.completions === 'string' ? json.completions : JSON.stringify(json.completions);
@@ -120,81 +160,74 @@ function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o')
 
       if (outputText) {
         const outputTokens = reportedOut ?? tokenize(outputText, model).count;
-        return { response: outputText, inputTokens, outputTokens };
+        return { response: outputText, outputTokens };
       }
     } catch { /* not JSON */ }
 
-    // Last resort: strip non-printable bytes and show whatever text is readable
+    // Last resort: strip non-printable bytes and show whatever is readable
     const readable = text.replace(/[^\x09\x0a\x0d\x20-\x7e]/g, '').trim();
     if (readable.length > 20) {
-      return { response: readable, inputTokens: null, outputTokens: null, isRaw: true };
+      return { response: readable, outputTokens: null, isRaw: true };
     }
   } catch { /* ignore */ }
   return null;
 }
 
-/**
- * Logs every proxied request.
- * Always prints METHOD + URL + status. Appends prompt and response with
- * explicit token counts when extraction succeeds.
- */
+// ─── Log helpers ─────────────────────────────────────────────────────────────
+
 function log(method, url, statusCode, reqData, resData) {
-  if (!reqData && !resData) return;   // skip telemetry and non-LLM traffic
-  const ts = new Date().toISOString();
+  if (!isDebug && !reqData?.userPrompt) return;  // INFO: skip non-LLM traffic
+  if (!reqData && !resData) return;              // DEBUG: skip if nothing to show
+  const ts    = new Date().toISOString();
   const lines = [`[${ts}] ${method} ${url} → ${statusCode}`];
-  if (reqData) {
-    lines.push(`  PROMPT  [${reqData.inputTokens} tokens] : ${reqData.prompt}`);
+
+  if (reqData?.systemPrompt) {
+    lines.push(`  SYSTEM [${reqData.systemTokens} tokens] : ${reqData.systemPrompt}`);
   }
-  if (resData) {
-    if (resData.isRaw) {
-      lines.push(`  RESPONSE [RAW — unknown format, fix extractResponse] : ${resData.response}`);
-    } else {
-      const inPart  = resData.inputTokens  != null ? `input: ${resData.inputTokens}` : null;
-      const outPart = resData.outputTokens != null ? `output: ${resData.outputTokens}` : null;
-      const tok     = [inPart, outPart].filter(Boolean).join(', ');
-      lines.push(`  RESPONSE${tok ? ` [${tok} tokens]` : ''} : ${resData.response}`);
-    }
+  if (reqData?.userPrompt) {
+    lines.push(`  INPUT  [${reqData.userTokens} tokens] : ${reqData.userPrompt}`);
+  }
+  if (resData && (!resData.isRaw || isDebug)) {
+    const tok = resData.outputTokens != null ? `${resData.outputTokens} tokens` : 'RAW';
+    lines.push(`  OUTPUT [${tok}] : ${resData.response}`);
   }
   console.log(lines.join('\n'));
 }
 
-/**
- * Logs a cache hit (exact or similar-prompt match).
- */
 function logCacheHit(method, url, reqData, resData, similarity = null) {
-  const ts       = new Date().toISOString();
-  const label    = similarity != null
+  const ts    = new Date().toISOString();
+  const label = similarity != null
     ? `CACHE HIT (similar ${(similarity * 100).toFixed(1)}%)`
     : 'CACHE HIT (exact)';
-  const lines    = [`[${ts}] ${method} ${url} → ${label}`];
-  if (reqData) {
-    lines.push(`  PROMPT  [${reqData.inputTokens} tokens] : ${reqData.prompt}`);
+  const lines = [`[${ts}] ${method} ${url} → ${label}`];
+
+  if (reqData?.systemPrompt) {
+    lines.push(`  SYSTEM [${reqData.systemTokens} tokens] : ${reqData.systemPrompt}`);
+  }
+  if (reqData?.userPrompt) {
+    lines.push(`  INPUT  [${reqData.userTokens} tokens] : ${reqData.userPrompt}`);
   }
   if (resData) {
-    const input  = resData.inputTokens  ?? 0;
-    const output = resData.outputTokens ?? 0;
-    const hasAny = resData.inputTokens != null || resData.outputTokens != null;
-    const tok    = hasAny
-      ? `input: ${input}, output: ${output}, total: ${input + output}`
-      : '';
-    lines.push(`  CACHED RESPONSE${tok ? ` [${tok} tokens]` : ''} : ${resData.response}`);
+    const out   = resData.outputTokens ?? 0;
+    const inp   = reqData ? (reqData.systemTokens + reqData.userTokens) : 0;
+    const total = inp + out;
+    lines.push(`  OUTPUT [${out} tokens, total saved: ${total}] : ${resData.response}`);
   }
   console.log(lines.join('\n'));
 }
 
-/**
- * Logs an intercepted simple-operation request (no LLM call made).
- */
 function logSimpleOp(method, url, reqData, opName, instruction, estimatedTokens) {
   const ts    = new Date().toISOString();
   const lines = [
-    `[${ts}] ${method} ${url} → SIMPLE OP INTERCEPTED — LLM call skipped`,
-    `  OPERATION        : ${opName}`,
-    `  ESTIMATED TOKENS : ${estimatedTokens} (saved by skipping LLM)`,
-    `  DO MANUALLY      : ${instruction}`,
+    `[${ts}] ${method} ${url} → SIMPLE OP INTERCEPTED`,
+    `  OPERATION    : ${opName}`,
+    `  DO MANUALLY  : ${instruction}`,
+    `  TOKENS SAVED : ${estimatedTokens}`,
   ];
-  if (reqData) lines.splice(1, 0, `  PROMPT  [${reqData.inputTokens} tokens] : ${reqData.prompt}`);
+  if (reqData?.userPrompt) {
+    lines.splice(1, 0, `  INPUT  [${reqData.userTokens} tokens] : ${reqData.userPrompt}`);
+  }
   console.log(lines.join('\n'));
 }
 
-module.exports = { log, logCacheHit, logSimpleOp, extractPrompt, extractResponse };
+module.exports = { log, logCacheHit, logSimpleOp, extractPrompt, extractResponse, isDebug };
