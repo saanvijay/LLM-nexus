@@ -1,6 +1,8 @@
 # LLM-PAYG
 
-Large Language Model Pay As You Go
+Large Language Model Pay As You Go — a lightweight MITM proxy that intercepts GitHub Copilot (and any OpenAI-compatible) traffic, logs prompts and completions with accurate token counts, caches responses to avoid redundant LLM calls, and exposes everything through a real-time observability dashboard and an MCP server for AI agent integration.
+
+---
 
 ## Project Structure
 
@@ -9,21 +11,27 @@ backend/
 ├── config/
 │   └── proxy.config.json     # All proxy settings
 ├── proxy/
-│   ├── server.js             # Entry point — server setup, CONNECT handler, listen
+│   ├── server.js             # Entry point — proxy + dashboard startup
 │   ├── handler.js            # Request / response forwarding logic
 │   └── certManager.js        # CA + per-host TLS cert generation & cache
+├── dashboard/
+│   ├── server.js             # HTTP server for dashboard UI + REST API (port 3001)
+│   └── store.js              # In-memory log store with SSE broadcast
+├── mcp/
+│   └── server.js             # MCP stdio server — AI agent tool integration
 └── utils/
-    ├── logger.js             # Log formatting, prompt/response extraction
+    ├── logger.js             # Prompt/response extraction and log formatting
     ├── cache.js              # In-memory prompt cache (exact + similarity matching)
     ├── tokenizer.js          # Real BPE token counting via tiktoken
     └── simpleOps.js          # Simple file-op detection and interception
+
+frontend/
+└── index.html                # Observability dashboard (single-file, no build step)
 ```
 
-## Local Proxy Server
+---
 
-A lightweight Node.js MITM (man-in-the-middle) proxy that intercepts HTTP and HTTPS traffic, logs prompts and completions with accurate token counts, caches responses to avoid redundant LLM calls, and intercepts trivial file operations that a human can perform manually.
-
-### Setup
+## Setup
 
 **1. Install dependencies**
 
@@ -37,7 +45,11 @@ cd backend && npm install
 node proxy/server.js
 ```
 
-On first run, a self-signed CA certificate is generated and saved to `backend/certs/`. The startup output will print the exact command to trust it.
+This starts two servers simultaneously:
+- **Proxy** on `http://localhost:3000` — intercepts all LLM traffic
+- **Dashboard** on `http://localhost:3001` — observability UI + REST API
+
+On first run a self-signed CA certificate is generated and saved to `backend/certs/`. The startup output prints the exact command to trust it.
 
 **3. Trust the CA cert (macOS, run once)**
 
@@ -55,13 +67,13 @@ Add to `~/.zprofile` (not `~/.zshrc` — GUI apps like VS Code don't read `~/.zs
 export NODE_EXTRA_CA_CERTS="/Users/vijay/LLM-PAYG/backend/certs/ca.crt"
 ```
 
-Also apply it immediately to the running session and all new GUI processes:
+Apply immediately:
 
 ```bash
 launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-PAYG/backend/certs/ca.crt"
 ```
 
-**5. Export proxy env**
+**5. Export proxy env vars**
 
 Add to `~/.zprofile`:
 
@@ -90,13 +102,112 @@ Add to VS Code `settings.json`:
 
 ---
 
-### Features
+## Observability Dashboard
 
-#### Token counting
+Open `http://localhost:3001` in any browser after starting the proxy.
 
-Every intercepted request is tokenised with [tiktoken](https://github.com/openai/tiktoken) — the same BPE tokeniser used by OpenAI models. Token counts are computed locally from the actual prompt and response text, so they are accurate even when the upstream API omits the `usage` field.
+### Stats bar
 
-The model is read from the request body (`json.model`) and the correct encoding is selected automatically:
+| Metric | Description |
+|---|---|
+| Total Calls | All intercepted requests |
+| Total Tokens | Cumulative tokens across all LLM calls |
+| Cache Hits | Exact + similarity hits served from cache |
+| Avg Latency | Mean round-trip time for upstream LLM calls |
+
+### Filter tabs
+
+- **All** — every intercepted event
+- **LLM Calls** — upstream completions with full prompt/response detail
+- **Cache Hits** — requests served from cache, including similarity score
+- **Simple Ops** — file operations intercepted before reaching the LLM
+
+### Detail panel
+
+Clicking any entry in the list opens a detail panel showing:
+- Model name, HTTP status, latency
+- Token breakdown cards — System / Input / Output / Total
+- Full system prompt, user input, and LLM output with syntax-highlighted sections
+
+### Live feed
+
+The dashboard connects to the proxy via Server-Sent Events and updates in real time without polling or page refresh. The green dot in the header indicates an active SSE connection.
+
+---
+
+## REST API
+
+The dashboard server exposes a REST API on port 3001 that any HTTP client or agent can call.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/logs` | All stored log entries (newest first) |
+| `GET` | `/api/logs?type=llm` | Filter by type: `llm`, `cache_hit`, `simple_op` |
+| `GET` | `/api/logs?query=async` | Full-text search across all log fields |
+| `GET` | `/api/logs?limit=20` | Limit result count (max 200) |
+| `GET` | `/api/stats` | Aggregate statistics (calls, tokens, cache hits, latency) |
+| `GET` | `/api/cache` | Cache entry count, similarity threshold, key previews |
+| `DELETE` | `/api/cache` | Clear the entire prompt cache |
+| `GET` | `/api/config` | Current proxy configuration |
+| `GET` | `/api/stream` | SSE live feed of new log entries |
+
+Parameters can be combined: `/api/logs?type=llm&query=async&limit=10`
+
+---
+
+## MCP Server (AI Agent Integration)
+
+The MCP (Model Context Protocol) server lets any MCP-compatible AI agent — Claude Desktop, custom agents, or agent frameworks — call this proxy's functions as tools.
+
+### Start the MCP server
+
+```bash
+node backend/mcp/server.js
+```
+
+The MCP server communicates over **stdio** (standard MCP convention) and talks to the dashboard REST API on `localhost:3001`. The proxy must be running first.
+
+### Available tools
+
+| Tool | Description |
+|---|---|
+| `get_logs` | Retrieve proxy logs — filterable by `type`, `query`, `limit` |
+| `get_stats` | Aggregate stats: calls, tokens, cache hits, avg latency |
+| `get_cache_info` | Cache entry count, similarity threshold, key previews |
+| `clear_cache` | Wipe the in-memory prompt cache |
+| `get_proxy_config` | Current proxy configuration |
+| `search_logs` | Full-text search across all log entries |
+
+### Connect to Claude Desktop
+
+Add to `~/.claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "llm-payg": {
+      "command": "node",
+      "args": ["/Users/vijay/LLM-PAYG/backend/mcp/server.js"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop. The tools will appear automatically under the llm-payg server.
+
+### Connect to any MCP-compatible agent
+
+Any agent that supports the Model Context Protocol can connect by launching the server as a subprocess and communicating via stdin/stdout. The server name is `llm-payg`, version `1.0.0`.
+
+---
+
+## Features
+
+### Token counting
+
+Every intercepted request is tokenised with [tiktoken](https://github.com/openai/tiktoken) — the same BPE tokeniser used by OpenAI models. Token counts are computed locally from the actual prompt and response text.
+
+The model is read from the request body and the correct encoding is selected automatically:
 
 | Model prefix | Encoding |
 |---|---|
@@ -105,19 +216,17 @@ The model is read from the request body (`json.model`) and the correct encoding 
 | `text-davinci` | `p50k_base` |
 | Unknown | `cl100k_base` (fallback) |
 
-#### Prompt cache
+### Prompt cache
 
-Identical and similar prompts are served from an in-memory cache, skipping the upstream LLM call entirely. The cache logs how many tokens would have been consumed.
+Identical and similar prompts are served from an in-memory cache, skipping the upstream LLM call entirely.
 
-**Exact match** — the full prompt text is used as a cache key. If the same prompt arrives again, the stored response is replayed instantly.
+**Exact match** — the full prompt text is the cache key. Same prompt → instant replay.
 
-**Similarity match** — prompts are tokenised into word sets and compared with Jaccard similarity. Any prompt scoring ≥ 75% against a cached entry is treated as a hit. The threshold can be changed by editing `SIMILARITY_THRESHOLD` in [backend/utils/cache.js](backend/utils/cache.js).
+**Similarity match** — prompts are tokenised into word sets and compared with Jaccard similarity. Any prompt scoring ≥ 75% against a cached entry is a hit. The threshold is configurable via `SIMILARITY_THRESHOLD` in [backend/utils/cache.js](backend/utils/cache.js).
 
-#### Simple-op interception
+### Simple-op interception
 
-Prompts that describe trivial file-system operations are intercepted before reaching the LLM. The proxy returns a plain-English instruction telling the user to perform the action manually, and logs how many tokens were saved.
-
-Detected operations:
+Prompts describing trivial file-system operations are intercepted before reaching the LLM. Enabled only when `saveToken: true` is set in config (default: `false`).
 
 | Prompt contains | Operation |
 |---|---|
@@ -128,62 +237,51 @@ Detected operations:
 | `copy file/directory` | Copy File / Directory |
 | `add a comment` | Add Comment |
 
+### Log levels
+
+Set `logLevel` in `proxy.config.json` or via the `LOG_LEVEL` environment variable.
+
+| Level | Behaviour |
+|---|---|
+| `INFO` (default) | Only LLM calls — prompts, responses, cache hits, simple ops |
+| `DEBUG` | Everything including raw HTTP traffic, telemetry, REST requests |
+
 ---
 
-### Request pipeline
-
-Each request passes through these stages in order:
+## Request pipeline
 
 ```
-1. Simple-op check   →  intercept immediately, return manual instruction, skip LLM
+1. Simple-op check   →  intercept immediately, return manual instruction (if saveToken: true)
 2. Exact cache hit   →  replay stored response, skip LLM
 3. Similar cache hit →  replay best matching cached response, skip LLM
-4. Upstream LLM call →  forward request, cache the response, return to client
+4. Upstream LLM call →  forward request, cache response, push to dashboard store
 ```
 
 ---
 
-### Log output
+## Configuration
 
-Every request produces at least one log line. Prompt and response details are appended when the body can be parsed.
+Edit [backend/config/proxy.config.json](backend/config/proxy.config.json):
 
-**Normal LLM call**
-```
-[2026-04-01T10:00:00.000Z] POST api.openai.com/v1/chat/completions → 200
-  PROMPT  [42 tokens] : [{"role":"user","content":"explain async/await"}]
-  RESPONSE [output: 87 tokens] : Async/await is syntactic sugar over Promises...
-```
+| Key | Default | Env override | Description |
+|---|---|---|---|
+| `port` | `3000` | `PORT` | Proxy listen port |
+| `host` | `localhost` | `HOST` | Proxy bind address |
+| `requestTimeout` | `30000` | `REQUEST_TIMEOUT` | Upstream timeout (ms) |
+| `logLevel` | `"INFO"` | `LOG_LEVEL` | `INFO` or `DEBUG` |
+| `saveToken` | `false` | — | Enable simple-op interception |
+| `defaultPorts.http` | `80` | — | Default HTTP port |
+| `defaultPorts.https` | `443` | — | Default HTTPS port |
 
-**Exact cache hit**
-```
-[2026-04-01T10:00:01.000Z] POST api.openai.com/v1/chat/completions → CACHE HIT (exact)
-  PROMPT  [42 tokens] : [{"role":"user","content":"explain async/await"}]
-  CACHED RESPONSE [input: 42, output: 87, total: 129 tokens] : Async/await is...
-```
-
-**Similar cache hit**
-```
-[2026-04-01T10:00:02.000Z] POST api.openai.com/v1/chat/completions → CACHE HIT (similar 81.3%)
-  PROMPT  [39 tokens] : [{"role":"user","content":"what is async/await?"}]
-  CACHED RESPONSE [input: 42, output: 87, total: 129 tokens] : Async/await is...
-```
-
-**Simple-op interception**
-```
-[2026-04-01T10:00:03.000Z] POST api.openai.com/v1/chat/completions → SIMPLE OP INTERCEPTED — LLM call skipped
-  PROMPT  [27 tokens] : [{"role":"user","content":"create a new file called config.yaml"}]
-  OPERATION        : Create / Add File
-  ESTIMATED TOKENS : 27 (saved by skipping LLM)
-  DO MANUALLY      : Run in your terminal:  touch <filename>
-```
+Dashboard port can be changed via the `DASHBOARD_PORT` environment variable (default `3001`).
 
 ---
 
-### Troubleshooting
+## Troubleshooting
 
-#### Certificate signature failure / regenerating certs
+### Certificate signature failure
 
-If you see `certificate signature failure`, the CA cert in the keychain no longer matches the key on disk. Regenerate from scratch:
+If you see `certificate signature failure`, the CA cert in the keychain no longer matches the key on disk:
 
 ```bash
 # 1. Remove old certs
@@ -200,11 +298,11 @@ sudo security add-trusted-cert -d -r trustRoot \
   -k /Library/Keychains/System.keychain \
   backend/certs/ca.crt
 
-# 5. Re-apply launchctl env vars and fully restart VS Code
+# 5. Re-apply env vars and fully restart VS Code
 launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-PAYG/backend/certs/ca.crt"
 ```
 
-#### Error reference
+### Error reference
 
 | Error | Fetcher | Fix |
 |---|---|---|
@@ -212,17 +310,3 @@ launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-PAYG/backend/certs/ca.crt
 | `fetch failed` | `node-fetch` | `NODE_EXTRA_CA_CERTS` in `~/.zprofile` + `launchctl` (step 4) |
 | `unable to verify first certificate` | `node-http` | `NODE_EXTRA_CA_CERTS` in `~/.zprofile` + `launchctl` (step 4) |
 | `certificate signature failure` | `node-http` | Regenerate certs (see above) |
-
----
-
-### Configuration
-
-Edit [backend/config/proxy.config.json](backend/config/proxy.config.json) to change defaults:
-
-| Key | Default | Env override |
-|---|---|---|
-| `port` | `3000` | `PORT` |
-| `host` | `localhost` | `HOST` |
-| `requestTimeout` | `30000` (ms) | `REQUEST_TIMEOUT` |
-| `defaultPorts.http` | `80` | — |
-| `defaultPorts.https` | `443` | — |

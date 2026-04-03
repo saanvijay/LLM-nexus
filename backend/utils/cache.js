@@ -110,4 +110,14 @@ function size() {
   return promptCache.size;
 }
 
-module.exports = { getCacheKey, get, findSimilar, set, size, SIMILARITY_THRESHOLD };
+/** Clears all cached entries. */
+function clear() {
+  promptCache.clear();
+}
+
+/** Returns all cache keys (for inspection). */
+function keys() {
+  return [...promptCache.keys()];
+}
+
+module.exports = { getCacheKey, get, findSimilar, set, size, clear, keys, SIMILARITY_THRESHOLD };
