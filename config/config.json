@@ -8,5 +8,12 @@
   "requestTimeout": 30000,
   "logLevel": "INFO",
   "saveToken": false,
-  "redactPII": true
+  "redactPII": true,
+  "rejectUnauthorized": false,
+  "upstreamProxy": {
+    "enabled": false,
+    "host": null,
+    "port": null,
+    "auth": null
+  }
 }

@@ -9,6 +9,12 @@ if (process.env.PORT) config.port = parseInt(process.env.PORT);
 if (process.env.HOST) config.host = process.env.HOST;
 if (process.env.REQUEST_TIMEOUT) config.requestTimeout = parseInt(process.env.REQUEST_TIMEOUT);
 
+// Disable outbound TLS verification at the process level when configured.
+// This is the most reliable way to cover all outgoing HTTPS connections.
+if (config.rejectUnauthorized === false) {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
 // Internal server that receives already-decrypted HTTPS connections
 const interceptServer = http.createServer(handleRequest);
 

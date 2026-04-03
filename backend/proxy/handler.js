@@ -1,11 +1,44 @@
 const http = require('http');
 const https = require('https');
+const tls = require('tls');
 const { URL } = require('url');
 const config = require('../../config/config.json');
 const { log, logCacheHit, logSimpleOp, extractPrompt, extractResponse, isDebug } = require('../utils/logger');
 const promptCache = require('../utils/cache');
 const { detectSimpleOp, buildInterceptResponse } = require('../utils/simpleOps');
 const { redactBuffer } = require('../utils/redactor');
+
+// ── Upstream proxy helpers ────────────────────────────────────────────────────
+
+function getUpstream() {
+  const u = config.upstreamProxy;
+  return (u && u.enabled && u.host && u.port) ? u : null;
+}
+
+function upstreamProxyAuth(upstream) {
+  if (!upstream.auth) return {};
+  return { 'proxy-authorization': `Basic ${Buffer.from(upstream.auth).toString('base64')}` };
+}
+
+// Opens a CONNECT tunnel through the upstream proxy to targetHost:targetPort.
+// Calls back with (err, rawSocket).
+function openTunnel(upstream, targetHost, targetPort, cb) {
+  const connectReq = http.request({
+    hostname: upstream.host,
+    port: upstream.port,
+    method: 'CONNECT',
+    path: `${targetHost}:${targetPort}`,
+    headers: { host: `${targetHost}:${targetPort}`, ...upstreamProxyAuth(upstream) },
+    timeout: config.requestTimeout,
+  });
+  connectReq.on('connect', (_res, socket) => cb(null, socket));
+  connectReq.on('error', cb);
+  connectReq.end();
+}
+
+// Agent used for all direct outgoing HTTPS requests.
+// rejectUnauthorized is read from config so it can be toggled without code changes.
+const outboundAgent = new https.Agent({ rejectUnauthorized: config.rejectUnauthorized ?? false });
 
 function replayHeaders(hit) {
   const h = { ...hit.headers };
@@ -28,18 +61,11 @@ function handleRequest(req, res) {
     try { parsed = new URL(base); }
     catch { res.writeHead(400); res.end('Bad Request'); return; }
 
-    const isHttps = parsed.protocol === 'https:';
-    const lib     = isHttps ? https : http;
-
-    const options = {
-      hostname: parsed.hostname,
-      port: parsed.port || (isHttps ? config.defaultPorts.https : config.defaultPorts.http),
-      path: parsed.pathname + parsed.search,
-      method: req.method,
-      headers: { ...req.headers, host: parsed.hostname },
-      timeout: config.requestTimeout,
-    };
-    delete options.headers['proxy-connection'];
+    const isHttps  = parsed.protocol === 'https:';
+    const upstream = getUpstream();
+    const targetPort = parseInt(parsed.port) || (isHttps ? config.defaultPorts.https : config.defaultPorts.http);
+    const reqHeaders = { ...req.headers, host: parsed.hostname };
+    delete reqHeaders['proxy-connection'];
 
     const contentType = req.headers['content-type'];
 
@@ -95,39 +121,79 @@ function handleRequest(req, res) {
       }
     }
 
-    const proxyReq = lib.request(options, (proxyRes) => {
-      const resChunks = [];
-      proxyRes.on('data', c => resChunks.push(c));
-      proxyRes.on('end', () => {
-        const duration  = Date.now() - startTime;
-        const resBuffer = Buffer.concat(resChunks);
-        const resData   = extractResponse(resBuffer, proxyRes.headers['content-type'], proxyRes.headers['content-encoding'], reqData?.model);
-        if (!resData && reqData && isDebug) {
-          console.log(`[DEBUG] content-type: ${proxyRes.headers['content-type']}`);
-          console.log(`[DEBUG] response body (first 500 chars):\n${resBuffer.toString('utf8').slice(0, 500)}`);
-        }
-        log(method, url, proxyRes.statusCode, reqData, resData, duration);
-        if (cacheKey) {
-          promptCache.set(cacheKey, resBuffer, proxyRes.statusCode, proxyRes.headers, resData);
-        }
-        if (!res.headersSent) {
-          res.writeHead(proxyRes.statusCode, proxyRes.headers);
-          res.end(resBuffer);
-        }
+    function dispatchRequest(socket) {
+      const options = {
+        hostname: upstream ? upstream.host       : parsed.hostname,
+        port:     upstream ? upstream.port       : targetPort,
+        path:     upstream && !socket ? `${parsed.protocol}//${parsed.hostname}:${targetPort}${parsed.pathname}${parsed.search}` : parsed.pathname + parsed.search,
+        method:   req.method,
+        headers:  { ...reqHeaders, ...(upstream && !socket ? upstreamProxyAuth(upstream) : {}) },
+        timeout:  config.requestTimeout,
+      };
+
+      let lib;
+      if (socket) {
+        // HTTPS through CONNECT tunnel — inject the pre-built TLS socket directly
+        lib = https;
+        options.agent = false;
+        options.createConnection = () => socket;
+      } else if (isHttps) {
+        // Direct HTTPS — use the module-level agent (honours rejectUnauthorized)
+        lib = https;
+        options.agent = outboundAgent;
+      } else {
+        lib = http;
+      }
+
+      const proxyReq = lib.request(options, (proxyRes) => {
+        const resChunks = [];
+        proxyRes.on('data', c => resChunks.push(c));
+        proxyRes.on('end', () => {
+          const duration  = Date.now() - startTime;
+          const resBuffer = Buffer.concat(resChunks);
+          const resData   = extractResponse(resBuffer, proxyRes.headers['content-type'], proxyRes.headers['content-encoding'], reqData?.model);
+          if (!resData && reqData && isDebug) {
+            console.log(`[DEBUG] content-type: ${proxyRes.headers['content-type']}`);
+            console.log(`[DEBUG] response body (first 500 chars):\n${resBuffer.toString('utf8').slice(0, 500)}`);
+          }
+          log(method, url, proxyRes.statusCode, reqData, resData, duration);
+          if (cacheKey) {
+            promptCache.set(cacheKey, resBuffer, proxyRes.statusCode, proxyRes.headers, resData);
+          }
+          if (!res.headersSent) {
+            res.writeHead(proxyRes.statusCode, proxyRes.headers);
+            res.end(resBuffer);
+          }
+        });
       });
-    });
 
-    proxyReq.on('timeout', () => {
-      proxyReq.destroy();
-      if (!res.headersSent) { res.writeHead(504); res.end('Gateway Timeout'); }
-    });
+      proxyReq.on('timeout', () => {
+        proxyReq.destroy();
+        if (!res.headersSent) { res.writeHead(504); res.end('Gateway Timeout'); }
+      });
 
-    proxyReq.on('error', (_err) => {
-      if (!res.headersSent) { res.writeHead(502); res.end('Bad Gateway'); }
-    });
+      proxyReq.on('error', (_err) => {
+        if (!res.headersSent) { res.writeHead(502); res.end('Bad Gateway'); }
+      });
 
-    if (safeBuffer.length) proxyReq.write(safeBuffer);
-    proxyReq.end();
+      if (safeBuffer.length) proxyReq.write(safeBuffer);
+      proxyReq.end();
+    }
+
+    if (upstream && isHttps) {
+      // Chain via CONNECT tunnel, then TLS-wrap the socket
+      openTunnel(upstream, parsed.hostname, targetPort, (err, socket) => {
+        if (err) {
+          if (!res.headersSent) { res.writeHead(502); res.end('Bad Gateway'); }
+          return;
+        }
+        const tlsSocket = tls.connect({ socket, servername: parsed.hostname, rejectUnauthorized: false });
+        dispatchRequest(tlsSocket);
+      });
+    } else {
+      // Direct or plain HTTP through upstream proxy (no tunnel needed)
+      dispatchRequest(null);
+    }
   });
 }
 

@@ -90,6 +90,8 @@ export HTTP_PROXY=http://localhost:3000
 export HTTPS_PROXY=http://localhost:3000
 ```
 
+> `HTTPS_PROXY` is required for LLM APIs — all Anthropic and OpenAI traffic is HTTPS. `HTTP_PROXY` alone will not intercept it.
+
 Apply immediately:
 
 ```bash
@@ -107,6 +109,29 @@ Add to VS Code `settings.json`:
 ```
 
 **7. Restart VS Code** (Cmd+Q — not just close the window) so Copilot picks up all changes.
+
+---
+
+## Using with CLI tools (Claude CLI, curl, etc.)
+
+GUI apps like VS Code pick up env vars from `launchctl`. CLI tools launched from a terminal only see what is exported in that shell session.
+
+Before launching any CLI tool you want to intercept, export all three vars in the same terminal:
+
+```bash
+export HTTP_PROXY=http://localhost:3000
+export HTTPS_PROXY=http://localhost:3000
+export NODE_EXTRA_CA_CERTS="/Users/vijay/LLM-nexus/backend/certs/ca.crt"
+claude   # or any other CLI
+```
+
+If you see **"SSL certificate verification failed"** with a CLI tool, the most common cause is that `NODE_EXTRA_CA_CERTS` is not set (or points to a stale path). Verify with:
+
+```bash
+echo $NODE_EXTRA_CA_CERTS
+```
+
+It must point to `backend/certs/ca.crt` inside this repo. If the path is wrong or empty, set it in the current shell before retrying.
 
 ---
 
@@ -329,6 +354,9 @@ Edit [config/config.json](config/config.json) for proxy-level settings:
 | `logLevel` | `"INFO"` | `LOG_LEVEL` | `INFO` or `DEBUG` |
 | `saveToken` | `false` | — | Enable simple-op interception |
 | `redactPII` | `true` | — | Enable PII redaction guardrail |
+| `upstreamProxy.host` | `null` | — | Hostname of the upstream (chained) proxy |
+| `upstreamProxy.port` | `null` | — | Port of the upstream proxy |
+| `upstreamProxy.auth` | `null` | — | Basic-auth credentials as `"user:password"`, or `null` |
 | `defaultPorts.http` | `80` | — | Default HTTP port |
 | `defaultPorts.https` | `443` | — | Default HTTPS port |
 
