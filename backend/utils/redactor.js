@@ -22,7 +22,7 @@
  * To add a custom rule, append an entry to piiRules in config.json.
  */
 
-const piiConfig = require('../config/pii.config.json');
+const piiConfig = require('../../config/pii.config.json');
 
 // ---------------------------------------------------------------------------
 // Compile rules from pii.config.json at startup (fail fast on bad patterns).

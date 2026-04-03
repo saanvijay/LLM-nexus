@@ -1,6 +1,6 @@
 const http = require('http');
 const tls  = require('tls');
-const config = require('../config/config.json');
+const config = require('../../config/config.json');
 const { handleRequest } = require('./handler');
 const { getCertForHost } = require('./certManager');
 require('../dashboard/server');

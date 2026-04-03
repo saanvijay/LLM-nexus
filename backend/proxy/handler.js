@@ -1,7 +1,7 @@
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
-const config = require('../config/config.json');
+const config = require('../../config/config.json');
 const { log, logCacheHit, logSimpleOp, extractPrompt, extractResponse, isDebug } = require('../utils/logger');
 const promptCache = require('../utils/cache');
 const { detectSimpleOp, buildInterceptResponse } = require('../utils/simpleOps');

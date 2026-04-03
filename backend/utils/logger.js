@@ -1,5 +1,5 @@
 const zlib   = require('zlib');
-const config = require('../config/config.json');
+const config = require('../../config/config.json');
 const { tokenize } = require('./tokenizer');
 
 const LOG_LEVEL = (process.env.LOG_LEVEL ?? config.logLevel ?? 'INFO').toUpperCase();

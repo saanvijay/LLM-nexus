@@ -1,16 +1,22 @@
 # LLM-nexus
 
-Large Language Model Nexus — a lightweight MITM proxy that intercepts GitHub Copilot (and any OpenAI-compatible) traffic, logs prompts and completions with accurate token counts, caches responses to avoid redundant LLM calls, and exposes everything through a real-time observability dashboard and an MCP server for AI agent integration.
+**LLM-Nexus** is a lightweight MITM proxy that sits between your AI coding tools (GitHub Copilot, any OpenAI-compatible client) and the upstream LLM. It provides:
+
+- **Observability** — intercepts every request, logs prompts and completions with accurate BPE token counts, and streams everything to a real-time dashboard
+- **Cost reduction** — serves repeated or similar prompts from an in-memory cache, skipping the upstream LLM call entirely
+- **Privacy guardrails** — redacts PII (emails, API keys, SSNs, credit cards, and more) from every request before it is logged, cached, or forwarded
+- **Agent integration** — exposes an MCP server so any MCP-compatible AI agent (Claude Desktop, custom agents) can query logs, stats, and cache as tools
 
 ---
 
 ## Project Structure
 
 ```
+config/
+├── config.json               # Proxy settings (port, logLevel, redactPII, etc.)
+└── pii.config.json           # PII redaction rules — add or disable rules here
+
 backend/
-├── config/
-│   ├── config.json           # Proxy settings (port, logLevel, redactPII, etc.)
-│   └── pii.config.json       # PII redaction rules — add or disable rules here
 ├── proxy/
 │   ├── server.js             # Entry point — proxy + dashboard startup
 │   ├── handler.js            # Request / response forwarding logic
@@ -66,13 +72,13 @@ sudo security add-trusted-cert -d -r trustRoot \
 Add to `~/.zprofile` (not `~/.zshrc` — GUI apps like VS Code don't read `~/.zshrc`):
 
 ```bash
-export NODE_EXTRA_CA_CERTS="/Users/vijay/LLM-PAYG/backend/certs/ca.crt"
+export NODE_EXTRA_CA_CERTS="/Users/vijay/LLM-nexus/backend/certs/ca.crt"
 ```
 
 Apply immediately:
 
 ```bash
-launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-PAYG/backend/certs/ca.crt"
+launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-nexus/backend/certs/ca.crt"
 ```
 
 **5. Export proxy env vars**
@@ -187,19 +193,19 @@ Add to `~/.claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "llm-payg": {
+    "llm-nexus": {
       "command": "node",
-      "args": ["/Users/vijay/LLM-PAYG/backend/mcp/server.js"]
+      "args": ["/Users/vijay/LLM-nexus/backend/mcp/server.js"]
     }
   }
 }
 ```
 
-Restart Claude Desktop. The tools will appear automatically under the llm-payg server.
+Restart Claude Desktop. The tools will appear automatically under the llm-nexus server.
 
 ### Connect to any MCP-compatible agent
 
-Any agent that supports the Model Context Protocol can connect by launching the server as a subprocess and communicating via stdin/stdout. The server name is `llm-payg`, version `1.0.0`.
+Any agent that supports the Model Context Protocol can connect by launching the server as a subprocess and communicating via stdin/stdout. The server name is `llm-nexus`, version `1.0.0`.
 
 ---
 
@@ -252,7 +258,7 @@ Set `logLevel` in `config.json` or via the `LOG_LEVEL` environment variable.
 
 When `redactPII: true` is set in `config.json` (default), the proxy scrubs Personally Identifiable Information from every request **before** it is logged, cached, or forwarded upstream. The original value is never stored anywhere.
 
-Rules are defined in [backend/config/pii.config.json](backend/config/pii.config.json). Each rule has:
+Rules are defined in [config/pii.config.json](config/pii.config.json). Each rule has:
 
 | Field | Description |
 |---|---|
@@ -313,7 +319,7 @@ Restart the proxy for changes to take effect. No code changes required.
 
 ### config.json
 
-Edit [backend/config/config.json](backend/config/config.json) for proxy-level settings:
+Edit [config/config.json](config/config.json) for proxy-level settings:
 
 | Key | Default | Env override | Description |
 |---|---|---|---|
@@ -330,7 +336,7 @@ Dashboard port can be changed via the `DASHBOARD_PORT` environment variable (def
 
 ### pii.config.json
 
-Edit [backend/config/pii.config.json](backend/config/pii.config.json) to manage PII redaction rules. See the [PII Redaction](#pii-redaction) section for the full rule schema and built-in rule list.
+Edit [config/pii.config.json](config/pii.config.json) to manage PII redaction rules. See the [PII Redaction](#pii-redaction) section for the full rule schema and built-in rule list.
 
 ---
 
@@ -345,7 +351,7 @@ If you see `certificate signature failure`, the CA cert in the keychain no longe
 rm backend/certs/ca.crt backend/certs/ca.key
 
 # 2. Remove old trusted cert from keychain
-sudo security delete-certificate -c "LLM-PAYG Proxy CA" /Library/Keychains/System.keychain
+sudo security delete-certificate -c "LLM-Nexus Proxy CA" /Library/Keychains/System.keychain
 
 # 3. Restart the server — new CA is generated automatically
 node proxy/server.js
@@ -356,7 +362,7 @@ sudo security add-trusted-cert -d -r trustRoot \
   backend/certs/ca.crt
 
 # 5. Re-apply env vars and fully restart VS Code
-launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-PAYG/backend/certs/ca.crt"
+launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-nexus/backend/certs/ca.crt"
 ```
 
 ### Error reference
