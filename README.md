@@ -9,7 +9,8 @@ Large Language Model Pay As You Go — a lightweight MITM proxy that intercepts 
 ```
 backend/
 ├── config/
-│   └── config.json     # All proxy settings
+│   ├── config.json           # Proxy settings (port, logLevel, redactPII, etc.)
+│   └── pii.config.json       # PII redaction rules — add or disable rules here
 ├── proxy/
 │   ├── server.js             # Entry point — proxy + dashboard startup
 │   ├── handler.js            # Request / response forwarding logic
@@ -23,7 +24,8 @@ backend/
     ├── logger.js             # Prompt/response extraction and log formatting
     ├── cache.js              # In-memory prompt cache (exact + similarity matching)
     ├── tokenizer.js          # Real BPE token counting via tiktoken
-    └── simpleOps.js          # Simple file-op detection and interception
+    ├── simpleOps.js          # Simple file-op detection and interception
+    └── redactor.js           # PII guardrail — redacts sensitive data before forwarding
 
 frontend/
 └── index.html                # Observability dashboard (single-file, no build step)
@@ -246,6 +248,54 @@ Set `logLevel` in `config.json` or via the `LOG_LEVEL` environment variable.
 | `INFO` (default) | Only LLM calls — prompts, responses, cache hits, simple ops |
 | `DEBUG` | Everything including raw HTTP traffic, telemetry, REST requests |
 
+### PII Redaction
+
+When `redactPII: true` is set in `config.json` (default), the proxy scrubs Personally Identifiable Information from every request **before** it is logged, cached, or forwarded upstream. The original value is never stored anywhere.
+
+Rules are defined in [backend/config/pii.config.json](backend/config/pii.config.json). Each rule has:
+
+| Field | Description |
+|---|---|
+| `name` | Canonical placeholder label, e.g. `EMAIL` → replaced with `[EMAIL]` |
+| `aliases` | Alternative names to reference this rule (e.g. `emailAddress`, `email_address`, `mail`) |
+| `description` | Human-readable explanation of what the rule detects |
+| `pattern` | JSON-escaped regex pattern string |
+| `flags` | Regex flags — `g`, `gi`, etc. |
+| `enabled` | Set to `false` to skip a rule without deleting it |
+
+#### Built-in rules
+
+| Name | Aliases | Detects |
+|---|---|---|
+| `API_KEY` | `apiKey`, `api_key`, `token`, `secret` | OpenAI `sk-...`, Anthropic `sk-ant-...`, GitHub `ghp_/gho_/ghs_`, Bearer tokens |
+| `CREDIT_CARD` | `creditCard`, `credit_card`, `cardNumber`, `card_number` | Visa, Mastercard, Amex, Discover 16-digit numbers |
+| `BANK_ACCOUNT` | `bankAccount`, `bank_account`, `accountNumber`, `routingNumber` | Account/routing numbers preceded by a label |
+| `SSN` | `ssn`, `socialSecurity`, `social_security`, `taxId`, `tax_id` | US Social Security Number (NNN-NN-NNNN) |
+| `PASSPORT` | `passport`, `passportNumber`, `passport_number` | 1-2 uppercase letters + 6-9 digits |
+| `AADHAAR` | `aadhaar`, `aadhar`, `uid`, `uidai` | Indian Aadhaar 12-digit ID |
+| `PAN` | `pan`, `panCard`, `pan_card`, `permanentAccountNumber` | Indian PAN card (AAAAA0000A) |
+| `EMAIL` | `email`, `emailAddress`, `email_address`, `mail` | Email addresses |
+| `PHONE` | `phone`, `phoneNumber`, `phone_number`, `mobile`, `cell` | US and international phone numbers |
+| `IP_ADDRESS` | `ipAddress`, `ip_address`, `ip`, `ipv4` | Public IPv4 (private ranges excluded) |
+| `DATE_OF_BIRTH` | `dateOfBirth`, `date_of_birth`, `dob`, `birthday`, `birthDate` | DOB when labelled with `dob:`, `born on`, `birthday`, etc. |
+
+#### Adding a custom rule
+
+Append an entry to `pii.config.json`:
+
+```json
+{
+  "name": "EMPLOYEE_ID",
+  "aliases": ["employeeId", "employee_id", "empId"],
+  "description": "Internal employee ID format EMP-XXXXXX",
+  "pattern": "\\bEMP-\\d{6}\\b",
+  "flags": "gi",
+  "enabled": true
+}
+```
+
+Restart the proxy for changes to take effect. No code changes required.
+
 ---
 
 ## Request pipeline
@@ -261,7 +311,9 @@ Set `logLevel` in `config.json` or via the `LOG_LEVEL` environment variable.
 
 ## Configuration
 
-Edit [backend/config/config.json](backend/config/config.json):
+### config.json
+
+Edit [backend/config/config.json](backend/config/config.json) for proxy-level settings:
 
 | Key | Default | Env override | Description |
 |---|---|---|---|
@@ -270,10 +322,15 @@ Edit [backend/config/config.json](backend/config/config.json):
 | `requestTimeout` | `30000` | `REQUEST_TIMEOUT` | Upstream timeout (ms) |
 | `logLevel` | `"INFO"` | `LOG_LEVEL` | `INFO` or `DEBUG` |
 | `saveToken` | `false` | — | Enable simple-op interception |
+| `redactPII` | `true` | — | Enable PII redaction guardrail |
 | `defaultPorts.http` | `80` | — | Default HTTP port |
 | `defaultPorts.https` | `443` | — | Default HTTPS port |
 
 Dashboard port can be changed via the `DASHBOARD_PORT` environment variable (default `3001`).
+
+### pii.config.json
+
+Edit [backend/config/pii.config.json](backend/config/pii.config.json) to manage PII redaction rules. See the [PII Redaction](#pii-redaction) section for the full rule schema and built-in rule list.
 
 ---
 

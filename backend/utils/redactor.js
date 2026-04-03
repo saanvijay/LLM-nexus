@@ -22,22 +22,45 @@
  * To add a custom rule, append an entry to piiRules in config.json.
  */
 
-const config = require('../config/config.json');
+const piiConfig = require('../config/pii.config.json');
 
 // ---------------------------------------------------------------------------
-// Compile rules from config at startup (fail fast on bad patterns)
+// Compile rules from pii.config.json at startup (fail fast on bad patterns).
+// Each rule is indexed by its canonical name AND every alias so callers can
+// look up a rule with any casing variant (e.g. "apiKey", "api_key", "API_KEY").
 // ---------------------------------------------------------------------------
-const RULES = (config.piiRules ?? [])
+const RULES = (Array.isArray(piiConfig) ? piiConfig : [])
   .filter(r => r.enabled !== false)
   .map(r => {
     try {
-      return { name: r.name, regex: new RegExp(r.pattern, r.flags ?? 'g') };
+      return {
+        name:    r.name,
+        aliases: Array.isArray(r.aliases) ? r.aliases : [],
+        regex:   new RegExp(r.pattern, r.flags ?? 'g'),
+      };
     } catch (err) {
       console.error(`[REDACT] Invalid pattern for rule "${r.name}": ${err.message}`);
       return null;
     }
   })
   .filter(Boolean);
+
+// Flat lookup: canonical name + every alias → rule (case-insensitive keys)
+const RULES_BY_ALIAS = new Map();
+for (const rule of RULES) {
+  const keys = [rule.name, ...rule.aliases];
+  for (const key of keys) {
+    RULES_BY_ALIAS.set(key.toLowerCase(), rule);
+  }
+}
+
+/**
+ * Look up a compiled rule by its canonical name or any alias.
+ * Returns the rule object or undefined if not found.
+ */
+function getRuleByName(nameOrAlias) {
+  return RULES_BY_ALIAS.get(nameOrAlias.toLowerCase());
+}
 
 // ---------------------------------------------------------------------------
 // Core redaction logic on a plain string
@@ -152,4 +175,4 @@ function redactString(text) {
   return redactText(text);
 }
 
-module.exports = { redactBuffer, redactString, RULES };
+module.exports = { redactBuffer, redactString, getRuleByName, RULES, RULES_BY_ALIAS };
