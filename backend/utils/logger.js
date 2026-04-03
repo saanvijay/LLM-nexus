@@ -207,59 +207,84 @@ function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o')
 
 // ─── Log helpers ─────────────────────────────────────────────────────────────
 
-function log(method, url, statusCode, reqData, resData) {
-  if (!isDebug && !reqData?.userPrompt) return;  // INFO: skip non-LLM traffic
-  if (!reqData && !resData) return;              // DEBUG: skip if nothing to show
-  const ts    = new Date().toISOString();
-  const lines = [`[${ts}] ${method} ${url} → ${statusCode}`];
+const store = require('../dashboard/store');
 
-  if (reqData?.systemPrompt) {
-    lines.push(`  SYSTEM [${reqData.systemTokens} tokens] : ${reqData.systemPrompt}`);
-  }
-  if (reqData?.userPrompt) {
-    lines.push(`  INPUT  [${reqData.userTokens} tokens] : ${reqData.userPrompt}`);
-  }
+function log(method, url, statusCode, reqData, resData, duration = 0) {
+  if (!isDebug && !reqData?.userPrompt) return;
+  if (!reqData && !resData) return;
+  const ts    = new Date().toISOString();
+  const lines = [`[${ts}] ${method} ${url} → ${statusCode} (${duration}ms)`];
+  if (reqData?.systemPrompt) lines.push(`  SYSTEM [${reqData.systemTokens} tokens] : ${reqData.systemPrompt}`);
+  if (reqData?.userPrompt)   lines.push(`  INPUT  [${reqData.userTokens} tokens] : ${reqData.userPrompt}`);
   if (resData) {
     const tok = resData.outputTokens != null ? `${resData.outputTokens} tokens` : '? tokens';
     lines.push(`  OUTPUT [${tok}] : ${resData.response}`);
   }
   console.log(lines.join('\n'));
+
+  store.push({
+    type: 'llm',
+    method, url, statusCode, duration,
+    model:        reqData?.model        ?? null,
+    systemPrompt: reqData?.systemPrompt ?? null,
+    systemTokens: reqData?.systemTokens ?? 0,
+    userPrompt:   reqData?.userPrompt   ?? null,
+    userTokens:   reqData?.userTokens   ?? 0,
+    response:     resData?.response     ?? null,
+    outputTokens: resData?.outputTokens ?? null,
+  });
 }
 
-function logCacheHit(method, url, reqData, resData, similarity = null) {
+function logCacheHit(method, url, reqData, resData, similarity = null, duration = 0) {
   const ts    = new Date().toISOString();
-  const label = similarity != null
-    ? `CACHE HIT (similar ${(similarity * 100).toFixed(1)}%)`
-    : 'CACHE HIT (exact)';
-  const lines = [`[${ts}] ${method} ${url} → ${label}`];
-
-  if (reqData?.systemPrompt) {
-    lines.push(`  SYSTEM [${reqData.systemTokens} tokens] : ${reqData.systemPrompt}`);
-  }
-  if (reqData?.userPrompt) {
-    lines.push(`  INPUT  [${reqData.userTokens} tokens] : ${reqData.userPrompt}`);
-  }
+  const label = similarity != null ? `CACHE HIT (similar ${(similarity * 100).toFixed(1)}%)` : 'CACHE HIT (exact)';
+  const lines = [`[${ts}] ${method} ${url} → ${label} (${duration}ms)`];
+  if (reqData?.systemPrompt) lines.push(`  SYSTEM [${reqData.systemTokens} tokens] : ${reqData.systemPrompt}`);
+  if (reqData?.userPrompt)   lines.push(`  INPUT  [${reqData.userTokens} tokens] : ${reqData.userPrompt}`);
   if (resData) {
-    const out   = resData.outputTokens ?? 0;
-    const inp   = reqData ? (reqData.systemTokens + reqData.userTokens) : 0;
-    const total = inp + out;
-    lines.push(`  OUTPUT [${out} tokens, total saved: ${total}] : ${resData.response}`);
+    const out = resData.outputTokens ?? 0, inp = reqData ? (reqData.systemTokens + reqData.userTokens) : 0;
+    lines.push(`  OUTPUT [${out} tokens, total saved: ${inp + out}] : ${resData.response}`);
   }
   console.log(lines.join('\n'));
+
+  store.push({
+    type: 'cache_hit',
+    method, url, statusCode: 200, duration,
+    similarity:   similarity != null ? Math.round(similarity * 100) : 100,
+    model:        reqData?.model        ?? null,
+    systemPrompt: reqData?.systemPrompt ?? null,
+    systemTokens: reqData?.systemTokens ?? 0,
+    userPrompt:   reqData?.userPrompt   ?? null,
+    userTokens:   reqData?.userTokens   ?? 0,
+    response:     resData?.response     ?? null,
+    outputTokens: resData?.outputTokens ?? null,
+  });
 }
 
-function logSimpleOp(method, url, reqData, opName, instruction, estimatedTokens) {
+function logSimpleOp(method, url, reqData, opName, instruction, estimatedTokens, duration = 0) {
   const ts    = new Date().toISOString();
   const lines = [
-    `[${ts}] ${method} ${url} → SIMPLE OP INTERCEPTED`,
+    `[${ts}] ${method} ${url} → SIMPLE OP INTERCEPTED (${duration}ms)`,
     `  OPERATION    : ${opName}`,
     `  DO MANUALLY  : ${instruction}`,
     `  TOKENS SAVED : ${estimatedTokens}`,
   ];
-  if (reqData?.userPrompt) {
-    lines.splice(1, 0, `  INPUT  [${reqData.userTokens} tokens] : ${reqData.userPrompt}`);
-  }
+  if (reqData?.userPrompt) lines.splice(1, 0, `  INPUT  [${reqData.userTokens} tokens] : ${reqData.userPrompt}`);
   console.log(lines.join('\n'));
+
+  store.push({
+    type: 'simple_op',
+    method, url, statusCode: 200, duration,
+    model:           reqData?.model      ?? null,
+    userPrompt:      reqData?.userPrompt ?? null,
+    userTokens:      reqData?.userTokens ?? 0,
+    systemPrompt:    null,
+    systemTokens:    0,
+    response:        `Do manually: ${instruction}`,
+    outputTokens:    0,
+    opName,
+    tokensSaved:     estimatedTokens,
+  });
 }
 
 module.exports = { log, logCacheHit, logSimpleOp, extractPrompt, extractResponse, isDebug };

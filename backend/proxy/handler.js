@@ -6,10 +6,6 @@ const { log, logCacheHit, logSimpleOp, extractPrompt, extractResponse, isDebug }
 const promptCache = require('../utils/cache');
 const { detectSimpleOp, buildInterceptResponse } = require('../utils/simpleOps');
 
-// Builds safe headers for replaying a cached response.
-// Strips transfer-encoding (body is already fully buffered) and sets an
-// explicit content-length so the client knows exactly when the body ends,
-// preventing the client from hanging and retrying in a loop.
 function replayHeaders(hit) {
   const h = { ...hit.headers };
   delete h['transfer-encoding'];
@@ -19,13 +15,12 @@ function replayHeaders(hit) {
 }
 
 function handleRequest(req, res) {
-  console.log(`[TRAFFIC] ${req.method} ${req.headers.host || ''}${req.url}`);
+  const startTime = Date.now();
   const reqChunks = [];
 
   req.on('data', c => reqChunks.push(c));
   req.on('end', () => {
     const reqBuffer = Buffer.concat(reqChunks);
-    console.log(`[BODY] ${req.headers.host} body=${reqBuffer.length}B first=${reqBuffer[0]?.toString(16) ?? 'empty'}`);
 
     const base = req.url.startsWith('http') ? req.url : `https://${req.headers.host}${req.url}`;
     let parsed;
@@ -50,16 +45,11 @@ function handleRequest(req, res) {
     const method      = req.method;
     const url         = `${parsed.hostname}${parsed.pathname}`;
 
-    // One-time diagnostic: show the raw request body for any JSON request where
-    // prompt extraction failed — remove this block once logs are working.
-    if (!reqData && reqBuffer.length > 2 && reqBuffer[0] === 0x7b) {
-      console.log(`[DIAG] ${method} ${url} — body: ${reqBuffer.toString('utf8').slice(0, 400)}`);
-    }
-
     // Simple-op interception: only active when saveToken is enabled in config
     const simpleOp = config.saveToken && detectSimpleOp(reqBuffer, contentType);
     if (simpleOp) {
-      logSimpleOp(method, url, reqData, simpleOp.opName, simpleOp.instruction, simpleOp.estimatedTokens);
+      const duration = Date.now() - startTime;
+      logSimpleOp(method, url, reqData, simpleOp.opName, simpleOp.instruction, simpleOp.estimatedTokens, duration);
       if (!res.headersSent) {
         const body = buildInterceptResponse(simpleOp.opName, simpleOp.instruction, simpleOp.estimatedTokens);
         res.writeHead(200, { 'content-type': 'application/json', 'content-length': body.length });
@@ -74,7 +64,7 @@ function handleRequest(req, res) {
     if (cacheKey) {
       const exactHit = promptCache.get(cacheKey);
       if (exactHit) {
-        logCacheHit(method, url, reqData, exactHit.resData, null);
+        logCacheHit(method, url, reqData, exactHit.resData, null, Date.now() - startTime);
         if (!res.headersSent) {
           res.writeHead(exactHit.statusCode, replayHeaders(exactHit));
           res.end(exactHit.rawBuffer);
@@ -84,7 +74,7 @@ function handleRequest(req, res) {
 
       const similarHit = promptCache.findSimilar(cacheKey);
       if (similarHit) {
-        logCacheHit(method, url, reqData, similarHit.entry.resData, similarHit.score);
+        logCacheHit(method, url, reqData, similarHit.entry.resData, similarHit.score, Date.now() - startTime);
         if (!res.headersSent) {
           res.writeHead(similarHit.entry.statusCode, replayHeaders(similarHit.entry));
           res.end(similarHit.entry.rawBuffer);
@@ -97,15 +87,14 @@ function handleRequest(req, res) {
       const resChunks = [];
       proxyRes.on('data', c => resChunks.push(c));
       proxyRes.on('end', () => {
-        const resBuffer  = Buffer.concat(resChunks);
-        const resData    = extractResponse(resBuffer, proxyRes.headers['content-type'], proxyRes.headers['content-encoding'], reqData?.model);
+        const duration  = Date.now() - startTime;
+        const resBuffer = Buffer.concat(resChunks);
+        const resData   = extractResponse(resBuffer, proxyRes.headers['content-type'], proxyRes.headers['content-encoding'], reqData?.model);
         if (!resData && reqData && isDebug) {
           console.log(`[DEBUG] content-type: ${proxyRes.headers['content-type']}`);
-          console.log(`[DEBUG] content-encoding: ${proxyRes.headers['content-encoding']}`);
           console.log(`[DEBUG] response body (first 500 chars):\n${resBuffer.toString('utf8').slice(0, 500)}`);
         }
-        log(method, url, proxyRes.statusCode, reqData, resData);
-        // Store in cache for future identical prompts
+        log(method, url, proxyRes.statusCode, reqData, resData, duration);
         if (cacheKey) {
           promptCache.set(cacheKey, resBuffer, proxyRes.statusCode, proxyRes.headers, resData);
         }

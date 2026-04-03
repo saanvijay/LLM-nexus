@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM-PAYG · Observability</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #8b949e;
+    --green:     #3fb950;
+    --blue:      #58a6ff;
+    --yellow:    #d29922;
+    --purple:    #bc8cff;
+    --red:       #f85149;
+    --hover:     #1f2937;
+  }
+
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Header ── */
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; margin-left: auto; }
+  .live-dot.off { background: var(--muted); box-shadow: none; animation: none; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .live-label { font-size: 12px; color: var(--muted); }
+
+  /* ── Stats bar ── */
+  .stats { display: flex; gap: 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .stat { flex: 1; padding: 10px 20px; border-right: 1px solid var(--border); }
+  .stat:last-child { border-right: none; }
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .stat-value { font-size: 22px; font-weight: 700; margin-top: 2px; }
+  .stat-value.green  { color: var(--green); }
+  .stat-value.blue   { color: var(--blue); }
+  .stat-value.yellow { color: var(--yellow); }
+  .stat-value.purple { color: var(--purple); }
+
+  /* ── Filters ── */
+  .filters { display: flex; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .filter-btn { padding: 4px 12px; border-radius: 20px; font-size: 12px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+  .filter-btn.active { background: var(--surface); color: var(--text); border-color: var(--blue); }
+
+  /* ── Main layout ── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Request list ── */
+  .list { width: 380px; flex-shrink: 0; border-right: 1px solid var(--border); overflow-y: auto; }
+  .list::-webkit-scrollbar { width: 4px; }
+  .list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .entry { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .1s; }
+  .entry:hover { background: var(--hover); }
+  .entry.selected { background: var(--hover); border-left: 3px solid var(--blue); }
+  .entry-top { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .badge { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .4px; flex-shrink: 0; }
+  .badge.llm        { background: rgba(63,185,80,.15); color: var(--green); }
+  .badge.cache_hit  { background: rgba(88,166,255,.15); color: var(--blue); }
+  .badge.simple_op  { background: rgba(210,153,34,.15); color: var(--yellow); }
+  .entry-model { font-size: 11px; color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .entry-time  { font-size: 10px; color: var(--muted); flex-shrink: 0; }
+  .entry-prompt { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 3px; }
+  .entry-meta  { display: flex; gap: 8px; font-size: 11px; color: var(--muted); }
+  .empty-list  { padding: 40px 20px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* ── Detail panel ── */
+  .detail { flex: 1; overflow-y: auto; padding: 20px; }
+  .detail::-webkit-scrollbar { width: 4px; }
+  .detail::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .detail-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-size: 14px; }
+
+  .detail-header { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .detail-header .badge { font-size: 12px; padding: 3px 10px; }
+  .detail-model { font-size: 13px; color: var(--blue); }
+  .detail-url   { font-size: 12px; color: var(--muted); }
+  .detail-meta  { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-left: auto; }
+
+  .section { margin-bottom: 16px; }
+  .section-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .token-pill { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1px 8px; font-size: 11px; color: var(--muted); }
+  .section-body { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; font-family: 'SF Mono', 'Fira Code', monospace; }
+  .section-body.system { border-left: 3px solid var(--purple); }
+  .section-body.input  { border-left: 3px solid var(--blue); }
+  .section-body.output { border-left: 3px solid var(--green); }
+  .section-body.op     { border-left: 3px solid var(--yellow); }
+
+  .token-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .token-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+  .token-card-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .token-card-value { font-size: 20px; font-weight: 700; }
+  .token-card-value.green  { color: var(--green); }
+  .token-card-value.blue   { color: var(--blue); }
+  .token-card-value.yellow { color: var(--yellow); }
+  .token-card-value.purple { color: var(--purple); }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+  <h1>LLM-PAYG · Observability</h1>
+  <span class="live-label" id="liveLabel">Connecting…</span>
+  <span class="live-dot off" id="liveDot"></span>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="stat-label">Total Calls</div><div class="stat-value green" id="statTotal">0</div></div>
+  <div class="stat"><div class="stat-label">Total Tokens</div><div class="stat-value blue" id="statTokens">0</div></div>
+  <div class="stat"><div class="stat-label">Cache Hits</div><div class="stat-value yellow" id="statCache">0</div></div>
+  <div class="stat"><div class="stat-label">Avg Latency</div><div class="stat-value purple" id="statLatency">—</div></div>
+</div>
+
+<div class="filters">
+  <button class="filter-btn active" data-filter="all">All</button>
+  <button class="filter-btn" data-filter="llm">LLM Calls</button>
+  <button class="filter-btn" data-filter="cache_hit">Cache Hits</button>
+  <button class="filter-btn" data-filter="simple_op">Simple Ops</button>
+</div>
+
+<div class="main">
+  <div class="list" id="list">
+    <div class="empty-list" id="emptyList">Waiting for requests…</div>
+  </div>
+  <div class="detail" id="detail">
+    <div class="detail-empty">Select a request to inspect it</div>
+  </div>
+</div>
+
+<script>
+  let logs       = [];
+  let filter     = 'all';
+  let selectedId = null;
+
+  // ── SSE ──────────────────────────────────────────────────────────────────
+  function connect() {
+    const es = new EventSource('/api/stream');
+    es.onopen    = () => setLive(true);
+    es.onerror   = () => { setLive(false); setTimeout(connect, 3000); es.close(); };
+    es.onmessage = e => {
+      const entry = JSON.parse(e.data);
+      if (entry.type === 'connected') return;
+      logs.unshift(entry);
+      updateStats();
+      renderList();
+    };
+  }
+
+  function setLive(on) {
+    document.getElementById('liveDot').className   = 'live-dot' + (on ? '' : ' off');
+    document.getElementById('liveLabel').textContent = on ? 'Live' : 'Reconnecting…';
+  }
+
+  // ── Load history ─────────────────────────────────────────────────────────
+  fetch('/api/logs').then(r => r.json()).then(data => {
+    logs = data;
+    updateStats();
+    renderList();
+  });
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
+  function updateStats() {
+    const llm   = logs.filter(l => l.type === 'llm');
+    const cache  = logs.filter(l => l.type === 'cache_hit');
+    const tokens = logs.reduce((s, l) => s + (l.userTokens || 0) + (l.systemTokens || 0) + (l.outputTokens || 0), 0);
+    const avgMs  = llm.length ? Math.round(llm.reduce((s, l) => s + (l.duration || 0), 0) / llm.length) : 0;
+    document.getElementById('statTotal').textContent   = logs.length;
+    document.getElementById('statTokens').textContent  = fmtNum(tokens);
+    document.getElementById('statCache').textContent   = cache.length;
+    document.getElementById('statLatency').textContent = llm.length ? avgMs + 'ms' : '—';
+  }
+
+  // ── List ──────────────────────────────────────────────────────────────────
+  function renderList() {
+    const visible = filter === 'all' ? logs : logs.filter(l => l.type === filter);
+    const el = document.getElementById('list');
+    document.getElementById('emptyList')?.remove();
+
+    // Remove stale entries
+    const ids = new Set(visible.map(l => l.id));
+    el.querySelectorAll('.entry').forEach(n => { if (!ids.has(n.dataset.id)) n.remove(); });
+
+    visible.forEach((entry, i) => {
+      let node = el.querySelector(`[data-id="${entry.id}"]`);
+      if (!node) {
+        node = buildEntryNode(entry);
+        const ref = el.querySelectorAll('.entry')[i];
+        ref ? el.insertBefore(node, ref) : el.appendChild(node);
+      }
+      node.classList.toggle('selected', entry.id === selectedId);
+    });
+
+    if (visible.length === 0) {
+      el.innerHTML = '<div class="empty-list" id="emptyList">No requests match this filter</div>';
+    }
+  }
+
+  function buildEntryNode(entry) {
+    const div = document.createElement('div');
+    div.className  = 'entry';
+    div.dataset.id = entry.id;
+    const sim  = entry.type === 'cache_hit' && entry.similarity != null ? ` ${entry.similarity}%` : '';
+    const tok  = totalTokens(entry);
+    div.innerHTML = `
+      <div class="entry-top">
+        <span class="badge ${entry.type}">${labelFor(entry)}${sim}</span>
+        <span class="entry-model">${entry.model ?? '—'}</span>
+        <span class="entry-time">${fmtTime(entry.timestamp)}</span>
+      </div>
+      <div class="entry-prompt">${esc(entry.userPrompt ?? entry.opName ?? '—')}</div>
+      <div class="entry-meta">
+        <span>${tok} tokens</span>
+        <span>${entry.duration ?? 0}ms</span>
+        ${entry.statusCode ? `<span>HTTP ${entry.statusCode}</span>` : ''}
+      </div>`;
+    div.addEventListener('click', () => { selectedId = entry.id; renderList(); showDetail(entry); });
+    return div;
+  }
+
+  // ── Detail ────────────────────────────────────────────────────────────────
+  function showDetail(e) {
+    const el  = document.getElementById('detail');
+    const inp = (e.systemTokens || 0) + (e.userTokens || 0);
+    const out = e.outputTokens ?? 0;
+    const sim = e.type === 'cache_hit' && e.similarity != null ? `${e.similarity}% match` : null;
+
+    el.innerHTML = `
+      <div class="detail-header">
+        <span class="badge ${e.type}">${labelFor(e)}</span>
+        <span class="detail-model">${e.model ?? '—'}</span>
+        <span class="detail-url">${e.url ?? ''}</span>
+        <div class="detail-meta">
+          <span>${fmtTime(e.timestamp)}</span>
+          <span>${e.duration ?? 0}ms</span>
+          ${sim ? `<span>${sim}</span>` : ''}
+        </div>
+      </div>
+
+      <div class="token-grid" style="margin-bottom:16px">
+        <div class="token-card"><div class="token-card-label">System Tokens</div><div class="token-card-value purple">${e.systemTokens ?? 0}</div></div>
+        <div class="token-card"><div class="token-card-label">Input Tokens</div><div class="token-card-value blue">${e.userTokens ?? 0}</div></div>
+        <div class="token-card"><div class="token-card-label">Output Tokens</div><div class="token-card-value green">${out}</div></div>
+        <div class="token-card"><div class="token-card-label">Total Tokens</div><div class="token-card-value yellow">${inp + out}</div></div>
+      </div>
+
+      ${e.systemPrompt ? section('System Prompt', e.systemPrompt, 'system', e.systemTokens) : ''}
+      ${e.userPrompt   ? section('Input',         e.userPrompt,   'input',  e.userTokens)  : ''}
+      ${e.response     ? section(e.type === 'simple_op' ? 'Action' : 'Output', e.response, e.type === 'simple_op' ? 'op' : 'output', out) : ''}
+    `;
+  }
+
+  function section(label, text, cls, tokens) {
+    return `<div class="section">
+      <div class="section-label">${label} ${tokens != null ? `<span class="token-pill">${tokens} tokens</span>` : ''}</div>
+      <div class="section-body ${cls}">${esc(text)}</div>
+    </div>`;
+  }
+
+  // ── Filters ───────────────────────────────────────────────────────────────
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      filter = btn.dataset.filter;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderList();
+    });
+  });
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function labelFor(e) {
+    return { llm: 'LLM', cache_hit: 'Cache', simple_op: 'Simple Op' }[e.type] ?? e.type;
+  }
+  function totalTokens(e) {
+    return (e.systemTokens || 0) + (e.userTokens || 0) + (e.outputTokens || 0);
+  }
+  function fmtTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+  function fmtNum(n) {
+    return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  }
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  connect();
+</script>
+</body>
+</html>

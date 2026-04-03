@@ -3,6 +3,7 @@ const tls  = require('tls');
 const config = require('../config/proxy.config.json');
 const { handleRequest } = require('./handler');
 const { getCertForHost } = require('./certManager');
+require('../dashboard/server');
 
 if (process.env.PORT) config.port = parseInt(process.env.PORT);
 if (process.env.HOST) config.host = process.env.HOST;
