@@ -1,5 +1,12 @@
 # LLM-nexus
 
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen?logo=node.js)](https://nodejs.org)
+[![Build](https://img.shields.io/github/actions/workflow/status/saanvijay/LLM-nexus/ci.yml?label=build)](https://github.com/saanvijay/LLM-nexus/actions)
+[![Code Quality](https://img.shields.io/codacy/grade/placeholder?label=code%20quality&logo=codacy)](https://app.codacy.com/gh/saanvijay/LLM-nexus)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/saanvijay/LLM-nexus/badge)](https://securityscorecards.dev/viewer/?uri=github.com/saanvijay/LLM-nexus)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/placeholder/badge)](https://www.bestpractices.dev/projects/placeholder)
+[![Commit Activity](https://img.shields.io/github/commit-activity/m/saanvijay/LLM-nexus)](https://github.com/saanvijay/LLM-nexus/commits/main)
+
 **LLM-Nexus** is a lightweight MITM proxy that sits between your AI coding tools (GitHub Copilot, any OpenAI-compatible client) and the upstream LLM. It provides:
 
 - **Observability** — intercepts every request, logs prompts and completions with accurate BPE token counts, and streams everything to a real-time dashboard
