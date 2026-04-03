@@ -1,4 +1,4 @@
-# LLM-PAYG
+# LLM-nexus
 
 Large Language Model Nexus — a lightweight MITM proxy that intercepts GitHub Copilot (and any OpenAI-compatible) traffic, logs prompts and completions with accurate token counts, caches responses to avoid redundant LLM calls, and exposes everything through a real-time observability dashboard and an MCP server for AI agent integration.
 
