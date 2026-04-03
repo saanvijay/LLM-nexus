@@ -30,8 +30,18 @@ function flattenContent(content) {
  */
 function extractPrompt(buffer) {
   if (!buffer || !buffer.length) return null;
+  // Reject non-JSON bodies immediately (binary, protobuf, etc.)
+  const firstByte = buffer[0];
+  if (firstByte !== 0x7b /* { */ && firstByte !== 0x5b /* [ */) return null;
   try {
-    const json  = JSON.parse(buffer.toString('utf8'));
+    const text = buffer.toString('utf8');
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // NDJSON or concatenated JSON — try the first line only
+      json = JSON.parse(text.split('\n')[0]);
+    }
     const model = json.model ?? 'gpt-4o';
 
     // Chat format: messages array — each item must have a role field,
@@ -122,15 +132,35 @@ function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o')
           }
         } catch { /* skip malformed chunk */ }
       }
+      // If known patterns found nothing, do a recursive scan of each chunk
+      // looking for any non-empty string in text-like fields — catches unknown formats
+      if (!content) {
+        const TEXT_FIELDS = ['content', 'text', 'value', 'message', 'output', 'answer'];
+        function findText(obj, depth) {
+          if (!obj || typeof obj !== 'object' || depth > 4) return null;
+          for (const key of TEXT_FIELDS) {
+            if (typeof obj[key] === 'string' && obj[key].length > 0) return obj[key];
+          }
+          for (const val of Object.values(obj)) {
+            const found = findText(val, depth + 1);
+            if (found) return found;
+          }
+          return null;
+        }
+        for (const line of text.split('\n')) {
+          if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
+          try {
+            const chunk = JSON.parse(line.slice(6));
+            const found = findText(chunk, 0);
+            if (found) content += found;
+          } catch { /* skip */ }
+        }
+      }
+
       if (content) {
         if (outputTokens == null) outputTokens = tokenize(content, model).count;
         return { response: content, outputTokens };
       }
-      // SSE detected but no text — dump raw data lines for diagnosis
-      const rawSSE = text.split('\n')
-        .filter(l => l.startsWith('data: ') && l !== 'data: [DONE]')
-        .join('\n');
-      if (rawSSE) return { response: rawSSE, outputTokens: null, isRaw: true };
       return null;
     }
 
@@ -169,7 +199,9 @@ function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o')
     if (readable.length > 20) {
       return { response: readable, outputTokens: null, isRaw: true };
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.error('[extractResponse error]', err.message);
+  }
   return null;
 }
 
@@ -187,8 +219,8 @@ function log(method, url, statusCode, reqData, resData) {
   if (reqData?.userPrompt) {
     lines.push(`  INPUT  [${reqData.userTokens} tokens] : ${reqData.userPrompt}`);
   }
-  if (resData && (!resData.isRaw || isDebug)) {
-    const tok = resData.outputTokens != null ? `${resData.outputTokens} tokens` : 'RAW';
+  if (resData) {
+    const tok = resData.outputTokens != null ? `${resData.outputTokens} tokens` : '? tokens';
     lines.push(`  OUTPUT [${tok}] : ${resData.response}`);
   }
   console.log(lines.join('\n'));

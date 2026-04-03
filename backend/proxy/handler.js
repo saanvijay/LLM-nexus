@@ -19,11 +19,13 @@ function replayHeaders(hit) {
 }
 
 function handleRequest(req, res) {
+  console.log(`[TRAFFIC] ${req.method} ${req.headers.host || ''}${req.url}`);
   const reqChunks = [];
 
   req.on('data', c => reqChunks.push(c));
   req.on('end', () => {
     const reqBuffer = Buffer.concat(reqChunks);
+    console.log(`[BODY] ${req.headers.host} body=${reqBuffer.length}B first=${reqBuffer[0]?.toString(16) ?? 'empty'}`);
 
     const base = req.url.startsWith('http') ? req.url : `https://${req.headers.host}${req.url}`;
     let parsed;
@@ -47,6 +49,12 @@ function handleRequest(req, res) {
     const reqData     = extractPrompt(reqBuffer);
     const method      = req.method;
     const url         = `${parsed.hostname}${parsed.pathname}`;
+
+    // One-time diagnostic: show the raw request body for any JSON request where
+    // prompt extraction failed — remove this block once logs are working.
+    if (!reqData && reqBuffer.length > 2 && reqBuffer[0] === 0x7b) {
+      console.log(`[DIAG] ${method} ${url} — body: ${reqBuffer.toString('utf8').slice(0, 400)}`);
+    }
 
     // Simple-op interception: only active when saveToken is enabled in config
     const simpleOp = config.saveToken && detectSimpleOp(reqBuffer, contentType);
