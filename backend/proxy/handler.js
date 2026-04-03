@@ -1,10 +1,11 @@
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
-const config = require('../config/proxy.config.json');
+const config = require('../config/config.json');
 const { log, logCacheHit, logSimpleOp, extractPrompt, extractResponse, isDebug } = require('../utils/logger');
 const promptCache = require('../utils/cache');
 const { detectSimpleOp, buildInterceptResponse } = require('../utils/simpleOps');
+const { redactBuffer } = require('../utils/redactor');
 
 function replayHeaders(hit) {
   const h = { ...hit.headers };
@@ -41,12 +42,23 @@ function handleRequest(req, res) {
     delete options.headers['proxy-connection'];
 
     const contentType = req.headers['content-type'];
-    const reqData     = extractPrompt(reqBuffer);
-    const method      = req.method;
-    const url         = `${parsed.hostname}${parsed.pathname}`;
+
+    // PII guardrail — redact before logging, caching, or forwarding upstream
+    const { buffer: safeBuffer, redactions } = config.redactPII
+      ? redactBuffer(reqBuffer, contentType)
+      : { buffer: reqBuffer, redactions: [] };
+
+    if (redactions.length) {
+      const summary = redactions.map(r => `${r.type}×${r.count}${r.role ? `(${r.role})` : ''}`).join(', ');
+      console.log(`[REDACT] PII removed from request: ${summary}`);
+    }
+
+    const reqData = extractPrompt(safeBuffer);
+    const method  = req.method;
+    const url     = `${parsed.hostname}${parsed.pathname}`;
 
     // Simple-op interception: only active when saveToken is enabled in config
-    const simpleOp = config.saveToken && detectSimpleOp(reqBuffer, contentType);
+    const simpleOp = config.saveToken && detectSimpleOp(safeBuffer, contentType);
     if (simpleOp) {
       const duration = Date.now() - startTime;
       logSimpleOp(method, url, reqData, simpleOp.opName, simpleOp.instruction, simpleOp.estimatedTokens, duration);
@@ -58,7 +70,7 @@ function handleRequest(req, res) {
       return;
     }
 
-    const cacheKey = promptCache.getCacheKey(reqBuffer, contentType);
+    const cacheKey = promptCache.getCacheKey(safeBuffer, contentType);
 
     // Cache lookup: exact match first, then similarity-based fallback
     if (cacheKey) {
@@ -114,7 +126,7 @@ function handleRequest(req, res) {
       if (!res.headersSent) { res.writeHead(502); res.end('Bad Gateway'); }
     });
 
-    if (reqBuffer.length) proxyReq.write(reqBuffer);
+    if (safeBuffer.length) proxyReq.write(safeBuffer);
     proxyReq.end();
   });
 }

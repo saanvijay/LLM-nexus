@@ -9,7 +9,7 @@ Large Language Model Pay As You Go — a lightweight MITM proxy that intercepts 
 ```
 backend/
 ├── config/
-│   └── proxy.config.json     # All proxy settings
+│   └── config.json     # All proxy settings
 ├── proxy/
 │   ├── server.js             # Entry point — proxy + dashboard startup
 │   ├── handler.js            # Request / response forwarding logic
@@ -239,7 +239,7 @@ Prompts describing trivial file-system operations are intercepted before reachin
 
 ### Log levels
 
-Set `logLevel` in `proxy.config.json` or via the `LOG_LEVEL` environment variable.
+Set `logLevel` in `config.json` or via the `LOG_LEVEL` environment variable.
 
 | Level | Behaviour |
 |---|---|
@@ -261,7 +261,7 @@ Set `logLevel` in `proxy.config.json` or via the `LOG_LEVEL` environment variabl
 
 ## Configuration
 
-Edit [backend/config/proxy.config.json](backend/config/proxy.config.json):
+Edit [backend/config/config.json](backend/config/config.json):
 
 | Key | Default | Env override | Description |
 |---|---|---|---|

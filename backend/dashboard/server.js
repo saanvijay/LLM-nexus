@@ -3,7 +3,7 @@ const fs   = require('fs');
 const path = require('path');
 const store = require('./store');
 const cache = require('../utils/cache');
-const config = require('../config/proxy.config.json');
+const config = require('../config/config.json');
 
 const PORT = process.env.DASHBOARD_PORT ?? 3001;
 const FRONTEND = path.join(__dirname, '../../frontend/index.html');
