@@ -23,8 +23,8 @@ if (fs.existsSync(CA_CERT_PATH) && fs.existsSync(CA_KEY_PATH)) {
   caCert.validity.notBefore = new Date();
   caCert.validity.notAfter  = new Date();
   caCert.validity.notAfter.setFullYear(caCert.validity.notBefore.getFullYear() + 10);
-  const attrs = [{ name: 'commonName', value: 'LLM-PAYG Proxy CA' },
-                 { name: 'organizationName', value: 'LLM-PAYG' }];
+  const attrs = [{ name: 'commonName', value: 'LLM-nexus Proxy CA' },
+                 { name: 'organizationName', value: 'LLM-nexus' }];
   caCert.setSubject(attrs);
   caCert.setIssuer(attrs);
   caCert.setExtensions([{ name: 'basicConstraints', cA: true },

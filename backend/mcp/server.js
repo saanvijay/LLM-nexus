@@ -1,5 +1,5 @@
 /**
- * LLM-PAYG MCP Server
+ * LLM-nexus MCP Server
  *
  * Exposes proxy observability and control as MCP tools so any MCP-compatible
  * AI agent (Claude Desktop, custom agents, etc.) can interact with this proxy.
@@ -13,9 +13,9 @@
  * Claude Desktop config (~/.claude/claude_desktop_config.json):
  *   {
  *     "mcpServers": {
- *       "llm-payg": {
+ *       "llm-nexus": {
  *         "command": "node",
- *         "args": ["/absolute/path/to/LLM-PAYG/backend/mcp/server.js"]
+ *         "args": ["/absolute/path/to/LLM-nexus/backend/mcp/server.js"]
  *       }
  *     }
  *   }
@@ -51,7 +51,7 @@ function apiCall(path, method = 'GET') {
 // MCP Server setup
 // ---------------------------------------------------------------------------
 const server = new McpServer({
-  name: 'llm-payg',
+  name: 'llm-nexus',
   version: '1.0.0',
 });
 
@@ -160,7 +160,7 @@ async function main() {
   await server.connect(transport);
   // MCP uses stdio — don't write anything to stdout (it breaks the protocol).
   // Log only to stderr so the host can capture it if needed.
-  process.stderr.write('LLM-PAYG MCP server started (stdio)\n');
+  process.stderr.write('LLM-nexus MCP server started (stdio)\n');
 }
 
 main().catch(err => {

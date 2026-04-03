@@ -1,7 +1,7 @@
 {
-  "name": "llm-payg-backend",
+  "name": "llm-nexus-backend",
   "version": "1.0.0",
-  "description": "LLM PAYG proxy server",
+  "description": "LLM nexus proxy server",
   "main": "proxy/server.js",
   "scripts": {
     "start": "node proxy/proxy.js"
