@@ -56,16 +56,19 @@ const server = new McpServer({
 });
 
 // ── Tool: get_logs ──────────────────────────────────────────────────────────
-server.tool(
+server.registerTool(
   'get_logs',
-  'Retrieve recent proxy logs. Optionally filter by type, keyword query, or limit count.',
   {
-    type:  z.enum(['llm', 'cache_hit', 'simple_op']).optional()
-              .describe('Filter by log type'),
-    query: z.string().optional()
-              .describe('Keyword to search across all log fields'),
-    limit: z.number().int().min(1).max(200).default(50)
-              .describe('Maximum number of entries to return (default 50)'),
+    description: 'Retrieve already-processed proxy logs. Optionally filter by type, keyword query, or limit count.',
+    inputSchema: {
+      type:  z.enum(['llm', 'cache_hit', 'simple_op']).optional()
+                .describe('Filter by log type'),
+      query: z.string().optional()
+                .describe('Keyword to search across all log fields'),
+      limit: z.number().int().min(1).max(200).default(50)
+                .describe('Maximum number of entries to return (default 50)'),
+    },
+    annotations: { readOnlyHint: true },
   },
   async ({ type, query, limit }) => {
     const params = new URLSearchParams();
@@ -80,10 +83,12 @@ server.tool(
 );
 
 // ── Tool: get_stats ─────────────────────────────────────────────────────────
-server.tool(
+server.registerTool(
   'get_stats',
-  'Get aggregate statistics: total calls, tokens used, cache hits, average latency, and current cache size.',
-  {},
+  {
+    description: 'Get aggregate statistics over already-processed requests: total calls, tokens used, cache hits, and average latency.',
+    annotations: { readOnlyHint: true },
+  },
   async () => {
     const stats = await apiCall('/api/stats');
     return {
@@ -93,10 +98,12 @@ server.tool(
 );
 
 // ── Tool: get_cache_info ────────────────────────────────────────────────────
-server.tool(
+server.registerTool(
   'get_cache_info',
-  'Inspect the in-memory prompt cache: number of entries, similarity threshold, and a preview of cached prompt keys.',
-  {},
+  {
+    description: 'Inspect the in-memory prompt cache built from already-processed requests: entry count, similarity threshold, and key previews.',
+    annotations: { readOnlyHint: true },
+  },
   async () => {
     const info = await apiCall('/api/cache');
     return {
@@ -105,42 +112,19 @@ server.tool(
   }
 );
 
-// ── Tool: clear_cache ───────────────────────────────────────────────────────
-server.tool(
-  'clear_cache',
-  'Clear all entries from the in-memory prompt cache. Subsequent identical prompts will call upstream instead of being served from cache.',
-  {},
-  async () => {
-    const result = await apiCall('/api/cache', 'DELETE');
-    return {
-      content: [{ type: 'text', text: result.message ?? 'Cache cleared' }],
-    };
-  }
-);
-
-// ── Tool: get_proxy_config ──────────────────────────────────────────────────
-server.tool(
-  'get_proxy_config',
-  'Return the current proxy configuration (port, log level, saveToken flag, timeouts, etc.).',
-  {},
-  async () => {
-    const cfg = await apiCall('/api/config');
-    return {
-      content: [{ type: 'text', text: JSON.stringify(cfg, null, 2) }],
-    };
-  }
-);
-
 // ── Tool: search_logs ───────────────────────────────────────────────────────
-server.tool(
+server.registerTool(
   'search_logs',
-  'Full-text search across all proxy log entries. Returns matching entries up to the given limit.',
   {
-    query: z.string().min(1).describe('Search term (case-insensitive)'),
-    type:  z.enum(['llm', 'cache_hit', 'simple_op']).optional()
-              .describe('Optionally restrict search to one log type'),
-    limit: z.number().int().min(1).max(200).default(20)
-              .describe('Maximum results to return'),
+    description: 'Full-text search across already-processed proxy log entries.',
+    inputSchema: {
+      query: z.string().min(1).describe('Search term (case-insensitive)'),
+      type:  z.enum(['llm', 'cache_hit', 'simple_op']).optional()
+                .describe('Optionally restrict search to one log type'),
+      limit: z.number().int().min(1).max(200).default(20)
+                .describe('Maximum results to return'),
+    },
+    annotations: { readOnlyHint: true },
   },
   async ({ query, type, limit }) => {
     const params = new URLSearchParams({ query, limit: String(limit ?? 20) });

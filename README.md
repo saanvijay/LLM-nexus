@@ -211,12 +211,10 @@ The MCP server communicates over **stdio** (standard MCP convention) and talks t
 
 | Tool | Description |
 |---|---|
-| `get_logs` | Retrieve proxy logs — filterable by `type`, `query`, `limit` |
-| `get_stats` | Aggregate stats: calls, tokens, cache hits, avg latency |
+| `get_logs` | Retrieve already-processed logs — filterable by `type`, `query`, `limit` |
+| `get_stats` | Aggregate stats over processed requests: calls, tokens, cache hits, avg latency |
 | `get_cache_info` | Cache entry count, similarity threshold, key previews |
-| `clear_cache` | Wipe the in-memory prompt cache |
-| `get_proxy_config` | Current proxy configuration |
-| `search_logs` | Full-text search across all log entries |
+| `search_logs` | Full-text search across already-processed log entries |
 
 ### Connect to Claude Desktop
 
