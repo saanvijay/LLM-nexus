@@ -40,22 +40,6 @@
     "enabled": true
   },
   {
-    "name": "AADHAAR",
-    "aliases": ["aadhaar", "aadhar", "uid", "uidai"],
-    "description": "Indian Aadhaar ID — 12 digits grouped as 4-4-4",
-    "pattern": "\\b[2-9]\\d{3}\\s?\\d{4}\\s?\\d{4}\\b",
-    "flags": "g",
-    "enabled": true
-  },
-  {
-    "name": "PAN",
-    "aliases": ["pan", "panCard", "pan_card", "permanentAccountNumber"],
-    "description": "Indian PAN card — AAAAA0000A format",
-    "pattern": "\\b[A-Z]{5}[0-9]{4}[A-Z]\\b",
-    "flags": "g",
-    "enabled": true
-  },
-  {
     "name": "EMAIL",
     "aliases": ["email", "emailAddress", "email_address", "mail"],
     "description": "Email addresses",

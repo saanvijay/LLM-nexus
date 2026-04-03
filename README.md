@@ -310,8 +310,6 @@ Rules are defined in [config/pii.config.json](config/pii.config.json). Each rule
 | `BANK_ACCOUNT` | `bankAccount`, `bank_account`, `accountNumber`, `routingNumber` | Account/routing numbers preceded by a label |
 | `SSN` | `ssn`, `socialSecurity`, `social_security`, `taxId`, `tax_id` | US Social Security Number (NNN-NN-NNNN) |
 | `PASSPORT` | `passport`, `passportNumber`, `passport_number` | 1-2 uppercase letters + 6-9 digits |
-| `AADHAAR` | `aadhaar`, `aadhar`, `uid`, `uidai` | Indian Aadhaar 12-digit ID |
-| `PAN` | `pan`, `panCard`, `pan_card`, `permanentAccountNumber` | Indian PAN card (AAAAA0000A) |
 | `EMAIL` | `email`, `emailAddress`, `email_address`, `mail` | Email addresses |
 | `PHONE` | `phone`, `phoneNumber`, `phone_number`, `mobile`, `cell` | US and international phone numbers |
 | `IP_ADDRESS` | `ipAddress`, `ip_address`, `ip`, `ipv4` | Public IPv4 (private ranges excluded) |
