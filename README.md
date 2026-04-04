@@ -44,6 +44,19 @@ frontend/
 └── index.html                # Observability dashboard (single-file, no build step)
 ```
 
+## Request pipeline
+
+![LLM-Nexus Request Pipeline](assets/flow-diagram.svg)
+
+> Source: [assets/flow-diagram.excalidraw](assets/flow-diagram.excalidraw) — open in [Excalidraw](https://excalidraw.com) to edit.
+
+| Step | Action |
+|---|---|
+| 1 | **Simple-op check** — intercept immediately, return manual instruction *(if `saveToken: true`)* |
+| 2 | **Exact cache hit** — replay stored response, skip LLM |
+| 3 | **Similar cache hit** — replay best matching cached response, skip LLM |
+| 4 | **Upstream LLM call** — forward request, cache response, push to dashboard store |
+
 ---
 
 ## Setup
@@ -329,21 +342,6 @@ Append an entry to `pii.config.json`:
 ```
 
 Restart the proxy for changes to take effect. No code changes required.
-
----
-
-## Request pipeline
-
-![LLM-Nexus Request Pipeline](assets/flow-diagram.svg)
-
-> Source: [assets/flow-diagram.excalidraw](assets/flow-diagram.excalidraw) — open in [Excalidraw](https://excalidraw.com) to edit.
-
-| Step | Action |
-|---|---|
-| 1 | **Simple-op check** — intercept immediately, return manual instruction *(if `saveToken: true`)* |
-| 2 | **Exact cache hit** — replay stored response, skip LLM |
-| 3 | **Similar cache hit** — replay best matching cached response, skip LLM |
-| 4 | **Upstream LLM call** — forward request, cache response, push to dashboard store |
 
 ---
 
