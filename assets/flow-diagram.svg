@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="980" viewBox="0 0 800 980" font-family="ui-sans-serif, system-ui, sans-serif">
+  <!-- Background -->
+  <rect width="800" height="980" fill="#ffffff"/>
+
+  <!-- Title -->
+  <text x="400" y="32" text-anchor="middle" font-size="20" font-weight="700" fill="#0f172a">LLM-Nexus Request Pipeline</text>
+
+  <!-- ── AI Coding Client ── -->
+  <rect x="215" y="52" width="220" height="52" rx="8" fill="#bfdbfe" stroke="#1e40af" stroke-width="2"/>
+  <text x="325" y="73" text-anchor="middle" font-size="15" font-weight="600" fill="#1e3a8a">AI Coding Client</text>
+  <text x="325" y="92" text-anchor="middle" font-size="11" fill="#475569">Copilot / OpenAI-compatible</text>
+
+  <!-- Arrow: client → proxy -->
+  <line x1="325" y1="104" x2="325" y2="126" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ── LLM-Nexus Proxy ── -->
+  <rect x="215" y="127" width="220" height="50" rx="8" fill="#bfdbfe" stroke="#1e40af" stroke-width="2"/>
+  <text x="325" y="152" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">LLM-Nexus Proxy  :3000</text>
+  <text x="325" y="168" text-anchor="middle" font-size="11" fill="#475569">HTTPS MITM intercept</text>
+
+  <!-- Arrow: proxy → pii -->
+  <line x1="325" y1="177" x2="325" y2="199" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ── PII Redactor ── -->
+  <rect x="215" y="200" width="220" height="50" rx="8" fill="#ede9fe" stroke="#7e22ce" stroke-width="2"/>
+  <text x="325" y="225" text-anchor="middle" font-size="14" font-weight="600" fill="#6b21a8">PII Redactor</text>
+  <text x="325" y="241" text-anchor="middle" font-size="11" fill="#7c3aed">Scrub emails, keys, SSNs, cards…</text>
+
+  <!-- Arrow: pii → simpleop -->
+  <line x1="325" y1="250" x2="325" y2="279" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ── Simple-Op? diamond ── -->
+  <!-- diamond: center (325, 315), half-w=110, half-h=42 -->
+  <polygon points="325,273 435,315 325,357 215,315" fill="#fde68a" stroke="#92400e" stroke-width="2"/>
+  <text x="325" y="310" text-anchor="middle" font-size="13" font-weight="600" fill="#78350f">Simple Op?</text>
+  <text x="325" y="327" text-anchor="middle" font-size="11" fill="#92400e">(saveToken: true)</text>
+
+  <!-- Arrow: simpleop Yes → right -->
+  <line x1="435" y1="315" x2="500" y2="315" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="463" y="308" text-anchor="middle" font-size="12" font-weight="600" fill="#1e293b">Yes</text>
+
+  <!-- Manual Instruction box -->
+  <rect x="500" y="291" width="195" height="48" rx="8" fill="#bbf7d0" stroke="#065f46" stroke-width="2"/>
+  <text x="597" y="313" text-anchor="middle" font-size="13" font-weight="600" fill="#064e3b">Return Manual</text>
+  <text x="597" y="330" text-anchor="middle" font-size="13" font-weight="600" fill="#064e3b">Instruction</text>
+
+  <!-- Arrow: simpleop No → down -->
+  <line x1="325" y1="357" x2="325" y2="383" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="335" y="375" text-anchor="start" font-size="12" font-weight="600" fill="#1e293b">No</text>
+
+  <!-- ── Exact Cache? diamond ── -->
+  <polygon points="325,384 435,426 325,468 215,426" fill="#fde68a" stroke="#92400e" stroke-width="2"/>
+  <text x="325" y="421" text-anchor="middle" font-size="13" font-weight="600" fill="#78350f">Exact Cache Hit?</text>
+  <text x="325" y="438" text-anchor="middle" font-size="11" fill="#92400e">Full prompt key match</text>
+
+  <!-- Arrow: exact Hit → right -->
+  <line x1="435" y1="426" x2="500" y2="426" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="463" y="418" text-anchor="middle" font-size="12" font-weight="600" fill="#1e293b">Hit</text>
+
+  <!-- Serve Cached Response (exact) -->
+  <rect x="500" y="402" width="195" height="48" rx="8" fill="#bbf7d0" stroke="#065f46" stroke-width="2"/>
+  <text x="597" y="424" text-anchor="middle" font-size="13" font-weight="600" fill="#064e3b">Serve Cached</text>
+  <text x="597" y="441" text-anchor="middle" font-size="13" font-weight="600" fill="#064e3b">Response</text>
+
+  <!-- Arrow: exact Miss → down -->
+  <line x1="325" y1="468" x2="325" y2="494" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="335" y="486" text-anchor="start" font-size="12" font-weight="600" fill="#1e293b">Miss</text>
+
+  <!-- ── Similarity? diamond ── -->
+  <polygon points="325,495 435,537 325,579 215,537" fill="#fde68a" stroke="#92400e" stroke-width="2"/>
+  <text x="325" y="531" text-anchor="middle" font-size="13" font-weight="600" fill="#78350f">Similarity Match?</text>
+  <text x="325" y="548" text-anchor="middle" font-size="11" fill="#92400e">Jaccard ≥ 75%</text>
+
+  <!-- Arrow: similarity Hit → right -->
+  <line x1="435" y1="537" x2="500" y2="537" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="463" y="529" text-anchor="middle" font-size="12" font-weight="600" fill="#1e293b">Hit</text>
+
+  <!-- Serve Cached Response (sim) -->
+  <rect x="500" y="513" width="195" height="48" rx="8" fill="#bbf7d0" stroke="#065f46" stroke-width="2"/>
+  <text x="597" y="535" text-anchor="middle" font-size="13" font-weight="600" fill="#064e3b">Serve Cached</text>
+  <text x="597" y="552" text-anchor="middle" font-size="13" font-weight="600" fill="#064e3b">Response</text>
+
+  <!-- Arrow: similarity Miss → down -->
+  <line x1="325" y1="579" x2="325" y2="605" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="335" y="597" text-anchor="start" font-size="12" font-weight="600" fill="#1e293b">Miss</text>
+
+  <!-- ── Forward to Upstream LLM ── -->
+  <rect x="215" y="606" width="220" height="50" rx="8" fill="#fecdd3" stroke="#9f1239" stroke-width="2"/>
+  <text x="325" y="630" text-anchor="middle" font-size="14" font-weight="600" fill="#881337">Forward to Upstream LLM</text>
+  <text x="325" y="647" text-anchor="middle" font-size="11" fill="#be123c">OpenAI / Anthropic / etc.</text>
+
+  <!-- Arrow: llm → cache+log (right) -->
+  <line x1="435" y1="631" x2="500" y2="631" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Cache + Log box -->
+  <rect x="500" y="607" width="195" height="50" rx="8" fill="#dbeafe" stroke="#1e40af" stroke-width="2"/>
+  <text x="597" y="629" text-anchor="middle" font-size="13" font-weight="600" fill="#1e3a8a">Cache Response</text>
+  <text x="597" y="646" text-anchor="middle" font-size="13" font-weight="600" fill="#1e3a8a">+ Log to Store</text>
+
+  <!-- Arrow: cache+log → dashboard -->
+  <line x1="597" y1="657" x2="597" y2="685" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ── Dashboard Store ── -->
+  <rect x="500" y="686" width="195" height="68" rx="8" fill="#ccfbf1" stroke="#0f766e" stroke-width="2"/>
+  <text x="597" y="708" text-anchor="middle" font-size="13" font-weight="600" fill="#134e4a">Dashboard  :3001</text>
+  <text x="597" y="725" text-anchor="middle" font-size="12" fill="#0f766e">+ MCP Server</text>
+  <text x="597" y="742" text-anchor="middle" font-size="12" fill="#0f766e">+ SSE Live Feed</text>
+
+  <!-- Arrow: llm → response (down) -->
+  <line x1="325" y1="656" x2="325" y2="680" stroke="#1e293b" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- ── Response to Client ── -->
+  <rect x="215" y="681" width="220" height="50" rx="8" fill="#bfdbfe" stroke="#1e40af" stroke-width="2"/>
+  <text x="325" y="706" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">Response → Client</text>
+  <text x="325" y="722" text-anchor="middle" font-size="11" fill="#475569">Streamed back to AI tool</text>
+
+  <!-- ── Legend ── -->
+  <rect x="60" y="780" width="680" height="170" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+  <text x="400" y="802" text-anchor="middle" font-size="13" font-weight="700" fill="#334155">Legend</text>
+
+  <rect x="85" y="815" width="14" height="14" rx="3" fill="#bfdbfe" stroke="#1e40af" stroke-width="1.5"/>
+  <text x="105" y="827" font-size="12" fill="#334155">Proxy / Client step</text>
+
+  <rect x="85" y="840" width="14" height="14" rx="3" fill="#ede9fe" stroke="#7e22ce" stroke-width="1.5"/>
+  <text x="105" y="852" font-size="12" fill="#334155">PII Redaction</text>
+
+  <rect x="85" y="865" width="14" height="14" rx="3" fill="#fecdd3" stroke="#9f1239" stroke-width="1.5"/>
+  <text x="105" y="877" font-size="12" fill="#334155">Upstream LLM call</text>
+
+  <rect x="85" y="890" width="14" height="14" rx="3" fill="#bbf7d0" stroke="#065f46" stroke-width="1.5"/>
+  <text x="105" y="902" font-size="12" fill="#334155">Cached / short-circuit response</text>
+
+  <polygon points="245,829 259,822 273,829 259,836" fill="#fde68a" stroke="#92400e" stroke-width="1.5"/>
+  <text x="280" y="832" font-size="12" fill="#334155">Decision / routing</text>
+
+  <rect x="245" y="840" width="14" height="14" rx="3" fill="#dbeafe" stroke="#1e40af" stroke-width="1.5"/>
+  <text x="265" y="852" font-size="12" fill="#334155">Logging &amp; caching</text>
+
+  <rect x="245" y="865" width="14" height="14" rx="3" fill="#ccfbf1" stroke="#0f766e" stroke-width="1.5"/>
+  <text x="265" y="877" font-size="12" fill="#334155">Observability (Dashboard, MCP, SSE)</text>
+
+  <text x="400" y="930" text-anchor="middle" font-size="11" fill="#94a3b8">Simple-op check only fires when saveToken: true in config.json</text>
+  <text x="400" y="948" text-anchor="middle" font-size="11" fill="#94a3b8">Similarity threshold configurable via SIMILARITY_THRESHOLD in cache.js</text>
+
+  <!-- Arrowhead marker -->
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#1e293b"/>
+    </marker>
+  </defs>
+</svg>
