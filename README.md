@@ -373,6 +373,41 @@ Edit [config/pii.config.json](config/pii.config.json) to manage PII redaction ru
 
 ---
 
+## Testing
+
+### Proxy chain smoke test
+
+[backend/tests/test-proxy-chain.js](backend/tests/test-proxy-chain.js) verifies the full upstream proxy-chain path without touching production config:
+
+1. Spins up a local mini CONNECT proxy on a random port
+2. Calls `openTunnel()` directly (same code path as `handler.js`)
+3. TLS-wraps the raw socket and fires a real HTTPS GET to `httpbin.org/get`
+
+```bash
+node backend/tests/test-proxy-chain.js
+```
+
+Expected output:
+
+```
+[mini-proxy] listening on 127.0.0.1:<port>
+
+Test 1: openTunnel() via mini-proxy → httpbin.org:443
+  [mini-proxy] CONNECT httpbin.org:443
+Test 2: TLS wrap + HTTPS GET https://httpbin.org/get
+  status: 200
+  body snippet: { "args": {}, "headers": { ...
+
+✓ Test 1 PASSED — mini-proxy received CONNECT tunnel request
+✓ Test 2 PASSED — TLS + HTTPS request succeeded through chain
+
+✅ Proxy chain is working.
+```
+
+> The test runs fully standalone — the LLM-nexus proxy does not need to be running and `upstreamProxy` in `config.json` does not need to be enabled.
+
+---
+
 ## Troubleshooting
 
 ### Certificate signature failure
