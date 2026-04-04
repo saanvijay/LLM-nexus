@@ -375,19 +375,31 @@ Edit [config/pii.config.json](config/pii.config.json) to manage PII redaction ru
 
 ## Testing
 
-### Proxy chain smoke test
+All tests live in [backend/tests/](backend/tests/) and are fully standalone — no proxy process needs to be running.
 
-[backend/tests/test-proxy-chain.js](backend/tests/test-proxy-chain.js) verifies the full upstream proxy-chain path without touching production config:
+| Test file | What it covers | Tests |
+|---|---|---|
+| [test-proxy-chain.js](backend/tests/test-proxy-chain.js) | Upstream proxy chain (CONNECT tunnel + TLS) | 2 |
+| [test-cache.js](backend/tests/test-cache.js) | In-memory prompt cache | 41 |
+| [test-redactor.js](backend/tests/test-redactor.js) | PII redaction — all 9 rules | 78 |
+
+Run all three:
+
+```bash
+node backend/tests/test-proxy-chain.js
+node backend/tests/test-cache.js
+node backend/tests/test-redactor.js
+```
+
+---
+
+### Proxy chain — `test-proxy-chain.js`
+
+Verifies the full upstream proxy-chain path without touching production config:
 
 1. Spins up a local mini CONNECT proxy on a random port
 2. Calls `openTunnel()` directly (same code path as `handler.js`)
 3. TLS-wraps the raw socket and fires a real HTTPS GET to `httpbin.org/get`
-
-```bash
-node backend/tests/test-proxy-chain.js
-```
-
-Expected output:
 
 ```
 [mini-proxy] listening on 127.0.0.1:<port>
@@ -396,7 +408,6 @@ Test 1: openTunnel() via mini-proxy → httpbin.org:443
   [mini-proxy] CONNECT httpbin.org:443
 Test 2: TLS wrap + HTTPS GET https://httpbin.org/get
   status: 200
-  body snippet: { "args": {}, "headers": { ...
 
 ✓ Test 1 PASSED — mini-proxy received CONNECT tunnel request
 ✓ Test 2 PASSED — TLS + HTTPS request succeeded through chain
@@ -404,7 +415,47 @@ Test 2: TLS wrap + HTTPS GET https://httpbin.org/get
 ✅ Proxy chain is working.
 ```
 
-> The test runs fully standalone — the LLM-nexus proxy does not need to be running and `upstreamProxy` in `config.json` does not need to be enabled.
+> `upstreamProxy` in `config.json` does not need to be enabled.
+
+---
+
+### Prompt cache — `test-cache.js`
+
+41 assertions across 7 sections:
+
+| Section | What is tested |
+|---|---|
+| `getCacheKey` | All four prompt fields (`prompt`, `messages`, `inputs`, `input`), wrong content-type, malformed JSON, field priority |
+| `set / get / size / clear / keys` | Basic CRUD, null on miss, key listing |
+| Overwrite | Re-inserting same key replaces value and refreshes insertion order |
+| `findSimilar` — strings | Exact score 1.0, near-identical hit (Jaccard ≥ 0.75), unrelated miss, empty cache |
+| `findSimilar` — messages | OpenAI `messages[]` format flattened correctly for similarity |
+| Best match selection | Returns highest-scoring entry when multiple candidates qualify |
+| `MAX_SIZE` eviction | Cache stays ≤ 500 entries; oldest entry evicted; re-insert does not exceed limit |
+
+---
+
+### PII redactor — `test-redactor.js`
+
+78 assertions covering all 9 built-in rules plus buffer-level behaviour:
+
+| Section | What is tested |
+|---|---|
+| Rule loading | All rules compiled, `getRuleByName` by canonical name / alias / case-insensitive |
+| `EMAIL` | Two matches in one string aggregated into one `found` entry with `count=2`; no false positives |
+| `PHONE` | US formats matched; short numbers ignored |
+| `SSN` | Valid format matched; `000-xx` and `9xx-xx` invalid prefixes excluded |
+| `CREDIT_CARD` | Visa, Mastercard, Discover formats |
+| `API_KEY` | OpenAI `sk-`, Anthropic `sk-ant-`, GitHub `ghp_` |
+| `BANK_ACCOUNT` | `account:` and `routing #` label variants |
+| `PASSPORT` | 1–2 uppercase letters + 6–9 digits |
+| `IP_ADDRESS` | Public IPs matched; private ranges (`10.x`, `192.168.x`, `127.x`) excluded |
+| `DATE_OF_BIRTH` | Four label variants matched; unlabelled dates not redacted |
+| Multi-type | EMAIL + SSN + PHONE in one string, all redacted independently |
+| `redactBuffer` no-ops | `null`, empty, non-JSON content-type, no-PII → original buffer reference returned |
+| `redactBuffer` messages | String content, OpenAI block-content array, image blocks untouched |
+| `redactBuffer` prompt | Plain `prompt` field redacted; `messages` + `prompt` both present |
+| Idempotency | Double-redacting a placeholder does not double-wrap it |
 
 ---
 

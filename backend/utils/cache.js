@@ -3,6 +3,11 @@
 // calling upstream and reports the total tokens that *would have been* consumed.
 
 const promptCache = new Map(); // key → { rawBuffer, statusCode, headers, resData }
+const tokenCache  = new Map(); // key → Set<string>  (memoised token sets for similarity)
+
+// Maximum number of entries retained. Oldest (insertion-order) entry is evicted
+// when the limit is exceeded, preventing unbounded memory growth.
+const MAX_SIZE = 500;
 
 // Default Jaccard similarity threshold for "similar prompt" matching (0–1).
 const SIMILARITY_THRESHOLD = 0.75;
@@ -57,6 +62,19 @@ function tokenize(text) {
 }
 
 /**
+ * Returns (and memoises) the token set for a cached key.
+ * Avoids re-tokenising the same key on every findSimilar call.
+ */
+function getTokens(key) {
+  let tokens = tokenCache.get(key);
+  if (!tokens) {
+    tokens = tokenize(flattenKey(key));
+    tokenCache.set(key, tokens);
+  }
+  return tokens;
+}
+
+/**
  * Jaccard similarity between two Sets: |A ∩ B| / |A ∪ B|.
  */
 function jaccard(a, b) {
@@ -83,7 +101,7 @@ function findSimilar(key, threshold = SIMILARITY_THRESHOLD) {
   let bestScore = 0;
 
   for (const [cachedKey, entry] of promptCache) {
-    const score = jaccard(newTokens, tokenize(flattenKey(cachedKey)));
+    const score = jaccard(newTokens, getTokens(cachedKey));
     if (score >= threshold && score > bestScore) {
       bestScore = score;
       bestEntry = entry;
@@ -95,6 +113,7 @@ function findSimilar(key, threshold = SIMILARITY_THRESHOLD) {
 
 /**
  * Stores a response in the cache.
+ * Evicts the oldest entry when MAX_SIZE is reached.
  * @param {string} key
  * @param {Buffer} rawBuffer    - original (possibly compressed) response body
  * @param {number} statusCode
@@ -102,6 +121,16 @@ function findSimilar(key, threshold = SIMILARITY_THRESHOLD) {
  * @param {object|null} resData - extracted { response, inputTokens, outputTokens }
  */
 function set(key, rawBuffer, statusCode, headers, resData) {
+  if (promptCache.has(key)) {
+    // Delete and re-insert to refresh insertion order
+    promptCache.delete(key);
+    tokenCache.delete(key);
+  } else if (promptCache.size >= MAX_SIZE) {
+    // Evict oldest entry (first key in Map iteration)
+    const oldest = promptCache.keys().next().value;
+    promptCache.delete(oldest);
+    tokenCache.delete(oldest);
+  }
   promptCache.set(key, { rawBuffer, statusCode, headers, resData });
 }
 
@@ -113,6 +142,7 @@ function size() {
 /** Clears all cached entries. */
 function clear() {
   promptCache.clear();
+  tokenCache.clear();
 }
 
 /** Returns all cache keys (for inspection). */
@@ -120,4 +150,4 @@ function keys() {
   return [...promptCache.keys()];
 }
 
-module.exports = { getCacheKey, get, findSimilar, set, size, clear, keys, SIMILARITY_THRESHOLD };
+module.exports = { getCacheKey, get, findSimilar, set, size, clear, keys, SIMILARITY_THRESHOLD, MAX_SIZE };
