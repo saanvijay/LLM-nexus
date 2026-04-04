@@ -1,11 +1,10 @@
 # LLM-nexus
 
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen?logo=node.js)](https://nodejs.org)
-[![Build](https://img.shields.io/github/actions/workflow/status/saanvijay/LLM-nexus/ci.yml?label=build)](https://github.com/saanvijay/LLM-nexus/actions)
-[![Code Quality](https://img.shields.io/codacy/grade/placeholder?label=code%20quality&logo=codacy)](https://app.codacy.com/gh/saanvijay/LLM-nexus)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/saanvijay/LLM-nexus/badge)](https://securityscorecards.dev/viewer/?uri=github.com/saanvijay/LLM-nexus)
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/placeholder/badge)](https://www.bestpractices.dev/projects/placeholder)
+[![License](https://img.shields.io/github/license/saanvijay/LLM-nexus)](https://github.com/saanvijay/LLM-nexus/blob/main/LICENSE)
 [![Commit Activity](https://img.shields.io/github/commit-activity/m/saanvijay/LLM-nexus)](https://github.com/saanvijay/LLM-nexus/commits/main)
+[![Last Commit](https://img.shields.io/github/last-commit/saanvijay/LLM-nexus)](https://github.com/saanvijay/LLM-nexus/commits/main)
+[![Issues](https://img.shields.io/github/issues/saanvijay/LLM-nexus)](https://github.com/saanvijay/LLM-nexus/issues)
 
 **LLM-Nexus** is a lightweight MITM proxy that sits between your AI coding tools (GitHub Copilot, any OpenAI-compatible client) and the upstream LLM. It provides:
 
@@ -92,13 +91,13 @@ sudo security add-trusted-cert -d -r trustRoot \
 Add to `~/.zprofile` (not `~/.zshrc` — GUI apps like VS Code don't read `~/.zshrc`):
 
 ```bash
-export NODE_EXTRA_CA_CERTS="/Users/vijay/LLM-nexus/backend/certs/ca.crt"
+export NODE_EXTRA_CA_CERTS="/Users/<your-username>/LLM-nexus/backend/certs/ca.crt"
 ```
 
 Apply immediately:
 
 ```bash
-launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-nexus/backend/certs/ca.crt"
+launchctl setenv NODE_EXTRA_CA_CERTS "/Users/<your-username>/LLM-nexus/backend/certs/ca.crt"
 ```
 
 **5. Export proxy env vars**
@@ -141,7 +140,7 @@ Before launching any CLI tool you want to intercept, export all three vars in th
 ```bash
 export HTTP_PROXY=http://localhost:3000
 export HTTPS_PROXY=http://localhost:3000
-export NODE_EXTRA_CA_CERTS="/Users/vijay/LLM-nexus/backend/certs/ca.crt"
+export NODE_EXTRA_CA_CERTS="/Users/<your-username>/LLM-nexus/backend/certs/ca.crt"
 claude   # or any other CLI
 ```
 
@@ -238,7 +237,7 @@ Add to `~/.claude/claude_desktop_config.json`:
   "mcpServers": {
     "llm-nexus": {
       "command": "node",
-      "args": ["/Users/vijay/LLM-nexus/backend/mcp/server.js"]
+      "args": ["/Users/<your-username>/LLM-nexus/backend/mcp/server.js"]
     }
   }
 }
@@ -481,7 +480,7 @@ sudo security add-trusted-cert -d -r trustRoot \
   backend/certs/ca.crt
 
 # 5. Re-apply env vars and fully restart VS Code
-launchctl setenv NODE_EXTRA_CA_CERTS "/Users/vijay/LLM-nexus/backend/certs/ca.crt"
+launchctl setenv NODE_EXTRA_CA_CERTS "/Users/<your-username>/LLM-nexus/backend/certs/ca.crt"
 ```
 
 ### Error reference
