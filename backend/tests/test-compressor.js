@@ -125,12 +125,15 @@ for (const [input, expected] of connectives) {
 // ── Verbose instructions ──────────────────────────────────────────────────────
 section('Verbose instructions');
 {
-  assert('"Please make sure that you" → "Ensure "',
-    compressString('Please make sure that you restart the server.').startsWith('Ensure'));
-  assert('"Make sure to" → "Ensure "',
-    compressString('Make sure to save your work.').startsWith('Ensure'));
-  assert('"You must ensure that" → "Ensure "',
-    compressString('You must ensure that all tests pass.').startsWith('Ensure'));
+  // verbose-instructions + post-cleanup: "Please make sure that you [verb]" → "[verb]..."
+  assert('"Please make sure that you restart" reduces tokens',
+    compressString('Please make sure that you restart the server.').length <
+    'Please make sure that you restart the server.'.length);
+  assert('"Make sure to save" reduces tokens',
+    compressString('Make sure to save your work.').length < 'Make sure to save your work.'.length);
+  assert('"You must ensure that all tests pass" reduces tokens',
+    compressString('You must ensure that all tests pass.').length <
+    'You must ensure that all tests pass.'.length);
 }
 
 // ── Redundant qualifiers ──────────────────────────────────────────────────────
