@@ -6,7 +6,7 @@
 [![Last Commit](https://img.shields.io/github/last-commit/saanvijay/LLM-nexus)](https://github.com/saanvijay/LLM-nexus/commits/main)
 [![Issues](https://img.shields.io/github/issues/saanvijay/LLM-nexus)](https://github.com/saanvijay/LLM-nexus/issues)
 
-**LLM-Nexus** is a lightweight MITM proxy that sits between your AI coding tools (GitHub Copilot, any OpenAI-compatible client) and the upstream LLM. It provides:
+**LLM-Nexus** is a lightweight MITM proxy that sits between any AI client and the upstream LLM. It provides:
 
 - **Observability** — intercepts every request, logs prompts and completions with accurate BPE token counts, and streams everything to a real-time dashboard
 - **Cost reduction** — serves repeated or similar prompts from an in-memory cache, skipping the upstream LLM call entirely
