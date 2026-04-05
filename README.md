@@ -9,7 +9,7 @@
 **LLM-Nexus** is a lightweight MITM proxy that sits between any AI client and the upstream LLM. It provides:
 
 - **Observability** — intercepts every request, logs prompts and completions with accurate BPE token counts, and streams everything to a real-time dashboard
-- **Cost reduction** — serves repeated or similar prompts from an in-memory cache, skipping the upstream LLM call entirely
+- **Cost reduction** — compresses verbose prompts to strip filler tokens, then serves repeated or semantically similar prompts from an in-memory cache, skipping the upstream LLM call entirely
 - **Privacy guardrails** — redacts PII (emails, API keys, SSNs, credit cards, and more) from every request before it is logged, cached, or forwarded
 - **Agent integration** — exposes an MCP server so any MCP-compatible AI agent (Claude Desktop, custom agents) can query logs, stats, and cache as tools
 
