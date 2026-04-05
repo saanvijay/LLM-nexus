@@ -7,6 +7,7 @@ const { log, logCacheHit, logSimpleOp, extractPrompt, extractResponse, isDebug }
 const promptCache = require('../utils/cache');
 const { detectSimpleOp, buildInterceptResponse } = require('../utils/simpleOps');
 const { redactBuffer } = require('../utils/redactor');
+const { compressBuffer } = require('../utils/compressor');
 
 // ── Upstream proxy helpers ────────────────────────────────────────────────────
 
@@ -79,12 +80,28 @@ function handleRequest(req, res) {
       console.log(`[REDACT] PII removed from request: ${summary}`);
     }
 
-    const reqData = extractPrompt(safeBuffer);
+    // Prompt compression — reduce tokens before caching or forwarding upstream
+    const { buffer: compressedBuffer, report: compressReport } = config.compressPrompts
+      ? compressBuffer(safeBuffer, contentType)
+      : { buffer: safeBuffer, report: null };
+
+    if (compressReport && compressReport.savedTokens > 0) {
+      console.log(`[COMPRESS] ${compressReport.savedTokens} tokens saved (${compressReport.savedPct}% reduction: ${compressReport.originalTokens} → ${compressReport.compressedTokens})`);
+    }
+
+    const finalBuffer = compressReport ? compressedBuffer : safeBuffer;
+
+    // Keep content-length in sync if compression changed the body size
+    if (compressReport && finalBuffer.length !== safeBuffer.length) {
+      reqHeaders['content-length'] = String(finalBuffer.length);
+    }
+
+    const reqData = extractPrompt(finalBuffer);
     const method  = req.method;
     const url     = `${parsed.hostname}${parsed.pathname}`;
 
     // Simple-op interception: only active when saveToken is enabled in config
-    const simpleOp = config.saveToken && detectSimpleOp(safeBuffer, contentType);
+    const simpleOp = config.saveToken && detectSimpleOp(finalBuffer, contentType);
     if (simpleOp) {
       const duration = Date.now() - startTime;
       logSimpleOp(method, url, reqData, simpleOp.opName, simpleOp.instruction, simpleOp.estimatedTokens, duration);
@@ -96,7 +113,7 @@ function handleRequest(req, res) {
       return;
     }
 
-    const cacheKey = promptCache.getCacheKey(safeBuffer, contentType);
+    const cacheKey = promptCache.getCacheKey(finalBuffer, contentType);
 
     // Cache lookup: exact match first, then similarity-based fallback
     if (cacheKey) {
@@ -156,7 +173,7 @@ function handleRequest(req, res) {
             console.log(`[DEBUG] content-type: ${proxyRes.headers['content-type']}`);
             console.log(`[DEBUG] response body (first 500 chars):\n${resBuffer.toString('utf8').slice(0, 500)}`);
           }
-          log(method, url, proxyRes.statusCode, reqData, resData, duration);
+          log(method, url, proxyRes.statusCode, reqData, resData, duration, compressReport);
           if (cacheKey) {
             promptCache.set(cacheKey, resBuffer, proxyRes.statusCode, proxyRes.headers, resData);
           }
@@ -176,7 +193,7 @@ function handleRequest(req, res) {
         if (!res.headersSent) { res.writeHead(502); res.end('Bad Gateway'); }
       });
 
-      if (safeBuffer.length) proxyReq.write(safeBuffer);
+      if (finalBuffer.length) proxyReq.write(finalBuffer);
       proxyReq.end();
     }
 

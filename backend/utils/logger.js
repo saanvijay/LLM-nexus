@@ -209,7 +209,7 @@ function extractResponse(buffer, contentType, contentEncoding, model = 'gpt-4o')
 
 const store = require('../dashboard/store');
 
-function log(method, url, statusCode, reqData, resData, duration = 0) {
+function log(method, url, statusCode, reqData, resData, duration = 0, compressionReport = null) {
   if (!isDebug && !reqData?.userPrompt) return;
   if (!reqData && !resData) return;
   const ts    = new Date().toISOString();
@@ -219,6 +219,9 @@ function log(method, url, statusCode, reqData, resData, duration = 0) {
   if (resData) {
     const tok = resData.outputTokens != null ? `${resData.outputTokens} tokens` : '? tokens';
     lines.push(`  OUTPUT [${tok}] : ${resData.response}`);
+  }
+  if (compressionReport?.savedTokens > 0) {
+    lines.push(`  COMPRESS [-${compressionReport.savedTokens} tokens, ${compressionReport.savedPct}% reduction: ${compressionReport.originalTokens} → ${compressionReport.compressedTokens}]`);
   }
   console.log(lines.join('\n'));
 
@@ -232,6 +235,10 @@ function log(method, url, statusCode, reqData, resData, duration = 0) {
     userTokens:   reqData?.userTokens   ?? 0,
     response:     resData?.response     ?? null,
     outputTokens: resData?.outputTokens ?? null,
+    compressionOriginalTokens:  compressionReport?.originalTokens  ?? null,
+    compressionCompressedTokens: compressionReport?.compressedTokens ?? null,
+    compressionSavedTokens:     compressionReport?.savedTokens     ?? null,
+    compressionSavedPct:        compressionReport?.savedPct        ?? null,
   });
 }
 

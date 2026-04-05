@@ -9,6 +9,7 @@
   "logLevel": "INFO",
   "saveToken": false,
   "redactPII": true,
+  "compressPrompts": true,
   "rejectUnauthorized": false,
   "upstreamProxy": {
     "enabled": false,

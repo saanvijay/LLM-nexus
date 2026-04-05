@@ -98,6 +98,20 @@
   .token-card-value.blue   { color: var(--blue); }
   .token-card-value.yellow { color: var(--yellow); }
   .token-card-value.purple { color: var(--purple); }
+  .token-card-value.red    { color: var(--red); }
+
+  /* ── Compression card ── */
+  .compression-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; margin-bottom: 16px; }
+  .compression-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .compression-title { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .compression-badge { font-size: 12px; font-weight: 700; color: var(--green); background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.25); border-radius: 10px; padding: 2px 10px; }
+  .compression-row { display: flex; align-items: center; gap: 10px; }
+  .compression-label { font-size: 11px; color: var(--muted); width: 60px; flex-shrink: 0; }
+  .compression-bar-wrap { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .compression-bar { height: 100%; border-radius: 3px; transition: width .4s ease; }
+  .compression-bar.before { background: var(--blue); }
+  .compression-bar.after  { background: var(--green); }
+  .compression-num { font-size: 12px; font-weight: 600; width: 44px; text-align: right; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -113,6 +127,7 @@
   <div class="stat"><div class="stat-label">Total Calls</div><div class="stat-value green" id="statTotal">0</div></div>
   <div class="stat"><div class="stat-label">Total Tokens</div><div class="stat-value blue" id="statTokens">0</div></div>
   <div class="stat"><div class="stat-label">Cache Hits</div><div class="stat-value yellow" id="statCache">0</div></div>
+  <div class="stat"><div class="stat-label">Tokens Saved</div><div class="stat-value green" id="statSaved">0</div></div>
   <div class="stat"><div class="stat-label">Avg Latency</div><div class="stat-value purple" id="statLatency">—</div></div>
 </div>
 
@@ -168,10 +183,12 @@
     const llm   = logs.filter(l => l.type === 'llm');
     const cache  = logs.filter(l => l.type === 'cache_hit');
     const tokens = logs.reduce((s, l) => s + (l.userTokens || 0) + (l.systemTokens || 0) + (l.outputTokens || 0), 0);
+    const saved  = llm.reduce((s, l) => s + (l.compressionSavedTokens || 0), 0);
     const avgMs  = llm.length ? Math.round(llm.reduce((s, l) => s + (l.duration || 0), 0) / llm.length) : 0;
     document.getElementById('statTotal').textContent   = logs.length;
     document.getElementById('statTokens').textContent  = fmtNum(tokens);
     document.getElementById('statCache').textContent   = cache.length;
+    document.getElementById('statSaved').textContent   = fmtNum(saved);
     document.getElementById('statLatency').textContent = llm.length ? avgMs + 'ms' : '—';
   }
 
@@ -248,6 +265,8 @@
         <div class="token-card"><div class="token-card-label">Total Tokens</div><div class="token-card-value yellow">${inp + out}</div></div>
       </div>
 
+      ${compressionCard(e)}
+
       ${e.systemPrompt ? section('System Prompt', e.systemPrompt, 'system', e.systemTokens) : ''}
       ${e.userPrompt   ? section('Input',         e.userPrompt,   'input',  e.userTokens)  : ''}
       ${e.response     ? section(e.type === 'simple_op' ? 'Action' : 'Output', e.response, e.type === 'simple_op' ? 'op' : 'output', out) : ''}
@@ -259,6 +278,35 @@
       <div class="section-label">${label} ${tokens != null ? `<span class="token-pill">${tokens} tokens</span>` : ''}</div>
       <div class="section-body ${cls}">${esc(text)}</div>
     </div>`;
+  }
+
+  function compressionCard(e) {
+    const orig = e.compressionOriginalTokens;
+    const comp = e.compressionCompressedTokens;
+    const saved = e.compressionSavedTokens;
+    const pct   = e.compressionSavedPct;
+    if (orig == null || saved == null || saved <= 0) return '';
+
+    const beforePct = 100;
+    const afterPct  = Math.round((comp / orig) * 100);
+
+    return `
+      <div class="compression-card">
+        <div class="compression-header">
+          <span class="compression-title">Prompt Compression</span>
+          <span class="compression-badge">−${saved} tokens (${pct}% saved)</span>
+        </div>
+        <div class="compression-row" style="margin-bottom:7px">
+          <span class="compression-label" style="color:var(--blue)">Before</span>
+          <div class="compression-bar-wrap"><div class="compression-bar before" style="width:${beforePct}%"></div></div>
+          <span class="compression-num" style="color:var(--blue)">${orig}</span>
+        </div>
+        <div class="compression-row">
+          <span class="compression-label" style="color:var(--green)">After</span>
+          <div class="compression-bar-wrap"><div class="compression-bar after" style="width:${afterPct}%"></div></div>
+          <span class="compression-num" style="color:var(--green)">${comp}</span>
+        </div>
+      </div>`;
   }
 
   // ── Filters ───────────────────────────────────────────────────────────────

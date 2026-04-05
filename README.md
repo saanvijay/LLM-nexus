@@ -274,6 +274,36 @@ Identical and similar prompts are served from an in-memory cache, skipping the u
 
 **Similarity match** — prompts are tokenised into word sets and compared with Jaccard similarity. Any prompt scoring ≥ 75% against a cached entry is a hit. The threshold is configurable via `SIMILARITY_THRESHOLD` in [backend/utils/cache.js](backend/utils/cache.js).
 
+### Prompt compression
+
+Before a request is forwarded to the upstream LLM (or stored in the cache), the proxy runs the prompt through a multi-pass compressor that reduces token count while preserving meaning. Enabled by default via `compressPrompts: true` in `config.json`.
+
+The compressor is implemented in [backend/utils/compressor.js](backend/utils/compressor.js) and applies 13 rules in order:
+
+| Pass | Rules | Example |
+|---|---|---|
+| Whitespace | Trailing spaces, 3+ blank lines, multiple spaces | `"too   many  spaces"` → `"too many spaces"` |
+| Punctuation | Repeated `!!!`, `???`, `....` | `"really???"` → `"really?"` |
+| AI filler | Self-introductions, hollow openers | `"Certainly! I'd be happy to help."` → `""` |
+| Verbose connectives | Long phrases → short equivalents | `"In order to"` → `"To"`, `"Due to the fact that"` → `"Because"` |
+| Verbose instructions | Wordy imperatives | `"Please make sure that you"` → `"Ensure"` |
+| Redundant qualifiers | Words that add length without precision | `"very unique"` → `"unique"`, `"basically"` → removed |
+| Deduplication | Identical adjacent sentences removed | Second copy of a repeated instruction dropped |
+
+**Token savings** are computed with tiktoken (same BPE tokeniser used for input/output counts) and logged on every call:
+
+```
+[COMPRESS] 24 tokens saved (28% reduction: 87 → 63)
+```
+
+The dashboard detail panel shows a **Compression card** with a before/after bar chart for each LLM call, and the stats bar tracks cumulative **Tokens Saved** across the session.
+
+To disable, set in `config.json`:
+
+```json
+"compressPrompts": false
+```
+
 ### Simple-op interception
 
 Prompts describing trivial file-system operations are intercepted before reaching the LLM. Enabled only when `saveToken: true` is set in config (default: `false`).
@@ -358,6 +388,7 @@ Edit [config/config.json](config/config.json) for proxy-level settings:
 | `logLevel` | `"INFO"` | `LOG_LEVEL` | `INFO` or `DEBUG` |
 | `saveToken` | `false` | — | Enable simple-op interception |
 | `redactPII` | `true` | — | Enable PII redaction guardrail |
+| `compressPrompts` | `true` | — | Enable prompt compression before forwarding |
 | `upstreamProxy.host` | `null` | — | Hostname of the upstream (chained) proxy |
 | `upstreamProxy.port` | `null` | — | Port of the upstream proxy |
 | `upstreamProxy.auth` | `null` | — | Basic-auth credentials as `"user:password"`, or `null` |
@@ -381,13 +412,15 @@ All tests live in [backend/tests/](backend/tests/) and are fully standalone — 
 | [test-proxy-chain.js](backend/tests/test-proxy-chain.js) | Upstream proxy chain (CONNECT tunnel + TLS) | 2 |
 | [test-cache.js](backend/tests/test-cache.js) | In-memory prompt cache | 41 |
 | [test-redactor.js](backend/tests/test-redactor.js) | PII redaction — all 9 rules | 78 |
+| [test-compressor.js](backend/tests/test-compressor.js) | Prompt compression — all 13 rules | 62 |
 
-Run all three:
+Run all:
 
 ```bash
 node backend/tests/test-proxy-chain.js
 node backend/tests/test-cache.js
 node backend/tests/test-redactor.js
+node backend/tests/test-compressor.js
 ```
 
 ---
@@ -455,6 +488,29 @@ Test 2: TLS wrap + HTTPS GET https://httpbin.org/get
 | `redactBuffer` messages | String content, OpenAI block-content array, image blocks untouched |
 | `redactBuffer` prompt | Plain `prompt` field redacted; `messages` + `prompt` both present |
 | Idempotency | Double-redacting a placeholder does not double-wrap it |
+
+---
+
+### Prompt compressor — `test-compressor.js`
+
+62 assertions covering all 13 rules and both `compressString` / `compressBuffer` entry points:
+
+| Section | What is tested |
+|---|---|
+| Rule inventory | All 13 rules present, every rule has `name`, `fn`, and `enabled` |
+| Whitespace | Trailing spaces, 3+ blank lines collapsed, multiple spaces normalised |
+| Punctuation | `!!` / `!!!` → `!`, `??` → `?`, `....` → `...` |
+| AI preamble | `"As an AI language model,"` and `"As a large language model,"` removed |
+| Filler openers | `"Certainly!"`, `"Of course!"`, `"I'd be happy to help"`, `"I hope this helps"`, `"Feel free to ask"` removed |
+| Verbose connectives | 13 phrase substitutions (`"In order to"` → `"To"`, `"Due to the fact that"` → `"Because"`, etc.) |
+| Verbose instructions | `"Please make sure that you"` / `"Make sure to"` / `"You must ensure that"` → `"Ensure"` |
+| Redundant qualifiers | `"very unique"` → `"unique"`, `"absolutely certain"` → `"certain"`, `"basically"` / `"literally"` removed |
+| Sentence deduplication | Duplicate adjacent sentence removed; unique sentences all retained |
+| Idempotency | Compressing an already-compressed string produces the same result |
+| `compressBuffer` no-ops | `null`, empty, non-JSON content-type, nothing-to-compress → original buffer reference returned |
+| `compressBuffer` messages | String content and OpenAI block-content arrays compressed; image blocks untouched |
+| `compressBuffer` prompt | Plain `prompt` field compressed |
+| Token savings | Verbose system prompt achieves ≥ 10 tokens / ≥ 10% reduction |
 
 ---
 
