@@ -1,5 +1,6 @@
 # LLM-nexus
 
+[![CI](https://github.com/saanvijay/LLM-nexus/actions/workflows/ci.yml/badge.svg)](https://github.com/saanvijay/LLM-nexus/actions/workflows/ci.yml)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen?logo=node.js)](https://nodejs.org)
 [![License](https://img.shields.io/github/license/saanvijay/LLM-nexus)](https://github.com/saanvijay/LLM-nexus/blob/main/LICENSE)
 [![Commit Activity](https://img.shields.io/github/commit-activity/m/saanvijay/LLM-nexus)](https://github.com/saanvijay/LLM-nexus/commits/main)
